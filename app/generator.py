@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+import time
 from typing import Optional
 
 from app.bedrock import discover_topics, invoke_bedrock
@@ -9,6 +11,10 @@ from app.ocr_jobs import load_document_from_job
 from app.pdf_extractor import ExtractedDocument, extract_text_from_pdf
 from app.schemas import Questao
 from app.storage import get_documento_by_job, save_geracao
+
+
+def _log(msg: str) -> None:
+    print(f"[gerador] {msg}", flush=True, file=sys.stdout)
 
 
 def _dedupe_questions(questoes: list[Questao]) -> list[Questao]:
@@ -43,6 +49,10 @@ def generate_from_text(
     pagina_inicio: Optional[int] = None,
     pagina_fim: Optional[int] = None,
     instrucoes_extras: Optional[str] = None,
+    idioma: str = "pt",
+    estilo: str = "clinico",
+    num_alternativas: int = 5,
+    incluir_explicacao: bool = True,
 ) -> tuple[list[Questao], dict]:
     chunks = chunk_text(
         text,
@@ -80,8 +90,19 @@ def generate_from_text(
 
     all_questoes: list[Questao] = []
     errors: list[str] = []
+    total = len(chunks)
+    t_start = time.time()
+    _log(
+        f"inicio: {total} chunk(s) · idioma={idioma} · estilo={estilo} · "
+        f"alts={num_alternativas} · explicacao={incluir_explicacao}"
+    )
 
-    for chunk in chunks:
+    for idx, chunk in enumerate(chunks, start=1):
+        t0 = time.time()
+        _log(
+            f"[chunk {idx}/{total}] {len(chunk.text)} chars · pags "
+            f"{chunk.page_start}-{chunk.page_end} → enviando ao Bedrock…"
+        )
         try:
             result = invoke_bedrock(
                 chunk.text,
@@ -93,12 +114,29 @@ def generate_from_text(
                 page_end=chunk.page_end,
                 tema=tema,
                 instrucoes_extras=instrucoes_extras,
+                idioma=idioma,
+                estilo=estilo,
+                num_alternativas=num_alternativas,
+                incluir_explicacao=incluir_explicacao,
             )
-            all_questoes.extend(_parse_questoes_from_llm(result))
+            novas = 0
+            for q in _parse_questoes_from_llm(result):
+                if q.idioma is None:
+                    q.idioma = idioma  # type: ignore[assignment]
+                if q.estilo is None:
+                    q.estilo = estilo  # type: ignore[assignment]
+                all_questoes.append(q)
+                novas += 1
+            _log(f"[chunk {idx}/{total}] OK · {novas} questao(oes) · {time.time() - t0:.1f}s")
         except Exception as e:
             errors.append(f"chunk {chunk.chunk_id}: {e}")
+            _log(f"[chunk {idx}/{total}] FALHA: {e}")
 
     all_questoes = _dedupe_questions(all_questoes)
+    _log(
+        f"fim: {len(all_questoes)} questao(oes) unicas em {time.time() - t_start:.1f}s "
+        f"(erros={len(errors)})"
+    )
 
     meta = {
         "chunks_processados": len(chunks),
@@ -113,6 +151,10 @@ def generate_from_text(
         "palavras_chave": palavras_chave or None,
         "intervalo_paginas": [pagina_inicio, pagina_fim] if (pagina_inicio or pagina_fim) else None,
         "filtro": filtro_info or None,
+        "idioma": idioma,
+        "estilo": estilo,
+        "num_alternativas": num_alternativas,
+        "incluir_explicacao": incluir_explicacao,
         "erros": errors if errors else None,
     }
     return all_questoes, meta
@@ -180,6 +222,7 @@ def generate_from_ocr_job(
         "tema", "palavras_chave", "pagina_inicio", "pagina_fim",
         "tipos", "dificuldade", "instrucoes_extras",
         "num_questoes_por_chunk", "max_chunks",
+        "idioma", "estilo", "num_alternativas", "incluir_explicacao",
     )}
     try:
         geracao_id = save_geracao(

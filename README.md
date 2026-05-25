@@ -3,6 +3,21 @@
 
 
 API em Python que gera questões a partir de **texto** ou **PDF**, com **OCR** para livros escaneados (Amazon Textract).
+Pensado para estudos médicos (Revalida / Residência / USMLE-like), com formatos de **caso clínico**, **diagnóstico**, **conduta**, **farmacologia**, **cirurgia**, **pediatria**, **obstetrícia**, **emergência (ABCDE)**, **saúde pública** e **interpretação de exame**.
+
+
+
+## Recursos principais
+
+
+
+- Múltipla escolha **A–D, A–E ou A–F** (padrão A–E).
+- Geração em **Português, Inglês ou Italiano**.
+- **Resposta comentada** automática: a própria LLM explica por que o gabarito é a alternativa correta e **por que cada distratora está errada**, citando o trecho do material.
+- Filtros por **tema**, **palavras-chave** e **intervalo de páginas**.
+- **Descoberta de temas** assistida pela LLM (varre o material e sugere assuntos clicáveis).
+- **Histórico** local (SQLite): cada PDF/OCR vira `documento`; cada lote vira `geração` com suas `questões` — incluindo as explicações.
+- Exportação **CSV** com colunas `alt_A..alt_F`, `expl_A..expl_F`, `explicacao`, `referencia`, `idioma`, `estilo`.
 
 
 

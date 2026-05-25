@@ -84,6 +84,51 @@
       <div id="temas-sugeridos" class="temas-sugeridos"></div>
     </fieldset>
 
+    <fieldset class="opts">
+      <legend>Formato médico</legend>
+      <div class="grid">
+        <div>
+          <label for="idioma">Idioma</label>
+          <select id="idioma">
+            <option value="pt" selected>Português</option>
+            <option value="en">English</option>
+            <option value="it">Italiano</option>
+          </select>
+        </div>
+        <div>
+          <label for="estilo">Estilo</label>
+          <select id="estilo">
+            <option value="clinico" selected>Caso clínico (Revalida/Residência)</option>
+            <option value="diagnostico">Diagnóstico mais provável</option>
+            <option value="conduta">Conduta inicial</option>
+            <option value="farmacologia">Farmacologia</option>
+            <option value="cirurgia">Cirurgia</option>
+            <option value="pediatria">Pediatria</option>
+            <option value="obstetricia">Obstetrícia / Ginecologia</option>
+            <option value="emergencia">Emergência (ABCDE)</option>
+            <option value="saude_publica">Saúde pública / Preventiva</option>
+            <option value="imagem">Interpretação de exame</option>
+            <option value="geral">Teórica geral</option>
+          </select>
+        </div>
+        <div>
+          <label for="num_alternativas">Alternativas</label>
+          <select id="num_alternativas">
+            <option value="4">4 (A–D)</option>
+            <option value="5" selected>5 (A–E)</option>
+            <option value="6">6 (A–F)</option>
+          </select>
+        </div>
+        <div>
+          <label for="incluir_explicacao">Resposta comentada</label>
+          <select id="incluir_explicacao">
+            <option value="true" selected>Sim — explicar A–E</option>
+            <option value="false">Não — só gabarito</option>
+          </select>
+        </div>
+      </div>
+    </fieldset>
+
     <div class="grid" style="margin-top: 1rem">
       <div>
         <label for="num_questoes">Questões por trecho</label>
@@ -91,7 +136,15 @@
       </div>
       <div>
         <label for="max_chunks">Máx. trechos (custo)</label>
-        <input type="number" id="max_chunks" min="1" max="50" placeholder="ex: 5" />
+        <input
+          type="number"
+          id="max_chunks"
+          min="1"
+          max="50"
+          value="3"
+          placeholder="ex: 5"
+          title="Cada trecho leva ~30–60s. Deixe 3 para teste rápido; aumente depois."
+        />
       </div>
       <div>
         <label for="tipos">Tipos</label>

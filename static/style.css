@@ -391,3 +391,115 @@ textarea {
   border-color: var(--err);
   color: var(--err);
 }
+
+.card .alts {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.card .alts li {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.card .alts li .letra {
+  font-weight: 600;
+  color: var(--accent);
+  min-width: 1.3rem;
+}
+
+.card .alts li.correta {
+  border-color: var(--ok);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.card .alts li.correta .letra {
+  color: var(--ok);
+}
+
+.card .badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.35rem;
+}
+
+.card .badges .badge {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.card details {
+  margin-top: 0.6rem;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  background: var(--surface);
+}
+
+.card details > summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.card details[open] > summary {
+  color: var(--text);
+  margin-bottom: 0.4rem;
+}
+
+.card details .expl-block {
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.card details .expl-block p {
+  margin: 0.25rem 0 0.5rem;
+}
+
+.card details .expl-alts {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.card details .expl-alts li {
+  font-size: 0.82rem;
+  padding: 0.35rem 0.5rem;
+  border-left: 2px solid var(--border);
+  color: var(--muted);
+}
+
+.card details .expl-alts li.correta {
+  border-left-color: var(--ok);
+  color: var(--text);
+}
+
+.card details .ref {
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-style: italic;
+  border-top: 1px dashed var(--border);
+  margin-top: 0.5rem;
+  padding-top: 0.4rem;
+}

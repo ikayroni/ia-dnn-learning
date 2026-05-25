@@ -19,8 +19,9 @@ class Settings(BaseSettings):
     aws_region: str = "us-east-1"
     # Inference profile — use modelo ATIVO (não "Legada") do seu Bedrock → Model catalog
     bedrock_model_id: str = "us.amazon.nova-lite-v1:0"
-    chunk_size_chars: int = 12000
-    chunk_overlap_chars: int = 1500
+    # 6000 chars ≈ 1500 tokens — bom equilibrio entre contexto e latência
+    chunk_size_chars: int = 6000
+    chunk_overlap_chars: int = 800
     max_chunks_per_request: int = 30
 
     # OCR (Amazon Textract + S3) — exige IAM (Access Key), não só chave Bedrock

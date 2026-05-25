@@ -225,6 +225,10 @@ def gerar_texto(body: GerarTextoRequest):
             pagina_inicio=body.pagina_inicio,
             pagina_fim=body.pagina_fim,
             instrucoes_extras=body.instrucoes_extras,
+            idioma=body.idioma,
+            estilo=body.estilo,
+            num_alternativas=body.num_alternativas,
+            incluir_explicacao=body.incluir_explicacao,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -246,6 +250,10 @@ async def gerar_pdf(
     pagina_inicio: Optional[int] = Form(default=None, ge=1),
     pagina_fim: Optional[int] = Form(default=None, ge=1),
     instrucoes_extras: Optional[str] = Form(default=None),
+    idioma: str = Form(default="pt"),
+    estilo: str = Form(default="clinico"),
+    num_alternativas: int = Form(default=5, ge=2, le=6),
+    incluir_explicacao: bool = Form(default=True),
 ):
     data = await _read_pdf_upload(arquivo)
     tipo_list = _parse_tipos(tipos)
@@ -263,6 +271,10 @@ async def gerar_pdf(
             pagina_inicio=pagina_inicio,
             pagina_fim=pagina_fim,
             instrucoes_extras=instrucoes_extras,
+            idioma=idioma,
+            estilo=estilo,
+            num_alternativas=num_alternativas,
+            incluir_explicacao=incluir_explicacao,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -284,6 +296,10 @@ def gerar_de_ocr_job(
     pagina_inicio: Optional[int] = None,
     pagina_fim: Optional[int] = None,
     instrucoes_extras: Optional[str] = None,
+    idioma: str = "pt",
+    estilo: str = "clinico",
+    num_alternativas: int = 5,
+    incluir_explicacao: bool = True,
 ):
     """Gera questões a partir do texto salvo por um job OCR concluído."""
     tipo_list = _parse_tipos(tipos)
@@ -300,6 +316,10 @@ def gerar_de_ocr_job(
             pagina_inicio=pagina_inicio,
             pagina_fim=pagina_fim,
             instrucoes_extras=instrucoes_extras,
+            idioma=idioma,
+            estilo=estilo,
+            num_alternativas=num_alternativas,
+            incluir_explicacao=incluir_explicacao,
         )
     except KeyError:
         raise HTTPException(status_code=404, detail="Job OCR não encontrado") from None

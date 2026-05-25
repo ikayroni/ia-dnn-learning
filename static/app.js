@@ -65,6 +65,33 @@ function hideStatus() {
   $("#status").className = "status-box";
 }
 
+let genTimer = null;
+let genStart = 0;
+
+function startGenTimer(baseMsg) {
+  stopGenTimer();
+  genStart = Date.now();
+  const tick = () => {
+    const sec = Math.floor((Date.now() - genStart) / 1000);
+    const mm = String(Math.floor(sec / 60)).padStart(2, "0");
+    const ss = String(sec % 60).padStart(2, "0");
+    showStatus(
+      `${baseMsg}<br><small>Tempo decorrido: <strong>${mm}:${ss}</strong> · cada trecho leva ~30–60s. Veja o terminal do servidor para progresso por trecho.</small>`,
+      "processing",
+      true
+    );
+  };
+  tick();
+  genTimer = setInterval(tick, 1000);
+}
+
+function stopGenTimer() {
+  if (genTimer) {
+    clearInterval(genTimer);
+    genTimer = null;
+  }
+}
+
 function clearResults() {
   $("#results").innerHTML = "";
 }
@@ -80,6 +107,10 @@ function getOpts() {
     pagina_inicio: $("#filtro_pag_ini").value || "",
     pagina_fim: $("#filtro_pag_fim").value || "",
     instrucoes_extras: ($("#instrucoes_extras").value || "").trim(),
+    idioma: $("#idioma").value || "pt",
+    estilo: $("#estilo").value || "clinico",
+    num_alternativas: $("#num_alternativas").value || "5",
+    incluir_explicacao: $("#incluir_explicacao").value === "true",
   };
 }
 
@@ -89,6 +120,10 @@ function appendOptParams(params, o) {
   if (o.pagina_inicio) params.set("pagina_inicio", o.pagina_inicio);
   if (o.pagina_fim) params.set("pagina_fim", o.pagina_fim);
   if (o.instrucoes_extras) params.set("instrucoes_extras", o.instrucoes_extras);
+  params.set("idioma", o.idioma);
+  params.set("estilo", o.estilo);
+  params.set("num_alternativas", o.num_alternativas);
+  params.set("incluir_explicacao", o.incluir_explicacao ? "true" : "false");
 }
 
 function appendOptForm(fd, o) {
@@ -97,34 +132,134 @@ function appendOptForm(fd, o) {
   if (o.pagina_inicio) fd.append("pagina_inicio", o.pagina_inicio);
   if (o.pagina_fim) fd.append("pagina_fim", o.pagina_fim);
   if (o.instrucoes_extras) fd.append("instrucoes_extras", o.instrucoes_extras);
+  fd.append("idioma", o.idioma);
+  fd.append("estilo", o.estilo);
+  fd.append("num_alternativas", o.num_alternativas);
+  fd.append("incluir_explicacao", o.incluir_explicacao ? "true" : "false");
+}
+
+const ESTILO_LABEL = {
+  clinico: "caso clínico",
+  diagnostico: "diagnóstico",
+  conduta: "conduta",
+  farmacologia: "farmacologia",
+  cirurgia: "cirurgia",
+  pediatria: "pediatria",
+  obstetricia: "obstetrícia",
+  emergencia: "emergência",
+  saude_publica: "saúde pública",
+  imagem: "exame/imagem",
+  geral: "teórica",
+};
+
+function metaResumo(meta) {
+  if (!meta) return "";
+  const parts = [];
+  if (meta.idioma) parts.push(`idioma: ${meta.idioma}`);
+  if (meta.estilo) parts.push(`estilo: ${ESTILO_LABEL[meta.estilo] || meta.estilo}`);
+  if (meta.num_alternativas) parts.push(`${meta.num_alternativas} alternativas`);
+  if (meta.tema) parts.push(`tema: ${meta.tema}`);
+  if (meta.questoes_geradas != null) parts.push(`${meta.questoes_geradas} q.`);
+  if (meta.modelo) parts.push(meta.modelo);
+  return parts.join(" · ");
 }
 
 function renderQuestions(data) {
   const { questoes, meta } = data;
   let html = `<h2>${questoes.length} questão(ões)</h2>`;
-  if (meta) {
-    html += `<p class="meta">${JSON.stringify(meta)}</p>`;
+  const resumo = metaResumo(meta);
+  if (resumo) html += `<p class="meta">${escapeHtml(resumo)}</p>`;
+  if (meta && meta.erros && meta.erros.length) {
+    html += `<p class="meta" style="color:var(--err)">${escapeHtml(
+      meta.erros.join(" | ")
+    )}</p>`;
   }
+
   questoes.forEach((q, i) => {
-    let alts = "";
-    if (q.alternativas && q.alternativas.length) {
-      alts =
-        "<ul>" +
-        q.alternativas
-          .map((a, j) => `<li>${String.fromCharCode(65 + j)}) ${escapeHtml(a)}</li>`)
-          .join("") +
-        "</ul>";
-    }
-    const fonte = q.fonte ? ` · pág. ${q.fonte.pagina_inicio || "?"}` : "";
-    html += `
-      <div class="card">
-        <div class="tipo">${q.tipo}${q.dificuldade ? " · " + q.dificuldade : ""}${fonte}</div>
-        <div class="enunciado">${i + 1}. ${escapeHtml(q.enunciado)}</div>
-        ${alts}
-        <div class="gabarito">Gabarito: ${escapeHtml(q.gabarito)}</div>
-      </div>`;
+    html += renderQuestionCard(q, i);
   });
   $("#results").innerHTML = html;
+}
+
+function renderQuestionCard(q, index) {
+  const fonte = q.fonte && q.fonte.pagina_inicio ? ` · pág. ${q.fonte.pagina_inicio}` : "";
+  const dif = q.dificuldade ? ` · ${q.dificuldade}` : "";
+
+  const badges = [];
+  if (q.idioma) badges.push(q.idioma);
+  if (q.estilo) badges.push(ESTILO_LABEL[q.estilo] || q.estilo);
+  const badgesHtml = badges.length
+    ? `<div class="badges">${badges
+        .map((b) => `<span class="badge">${escapeHtml(b)}</span>`)
+        .join("")}</div>`
+    : "";
+
+  let alts = "";
+  if (q.alternativas && q.alternativas.length) {
+    const gabarito = String(q.gabarito || "").trim().toUpperCase();
+    alts =
+      '<ul class="alts">' +
+      q.alternativas
+        .map((a, j) => {
+          const letra = String.fromCharCode(65 + j);
+          const correta = letra === gabarito ? " correta" : "";
+          return `<li class="alt${correta}"><span class="letra">${letra}</span><span>${escapeHtml(
+            a
+          )}</span></li>`;
+        })
+        .join("") +
+      "</ul>";
+  }
+
+  let detalhes = "";
+  const hasExpl = q.explicacao || (q.explicacoes_alternativas && Object.keys(q.explicacoes_alternativas).length);
+  if (hasExpl || q.referencia) {
+    const expls = renderExplicacoes(q);
+    detalhes = `
+      <details>
+        <summary>Ver resposta comentada</summary>
+        <div class="expl-block">${expls}</div>
+      </details>`;
+  }
+
+  return `
+    <div class="card">
+      <div class="tipo">${escapeHtml(q.tipo)}${dif}${fonte}</div>
+      ${badgesHtml}
+      <div class="enunciado">${index + 1}. ${escapeHtml(q.enunciado)}</div>
+      ${alts}
+      <div class="gabarito">Gabarito: ${escapeHtml(q.gabarito || "")}</div>
+      ${detalhes}
+    </div>`;
+}
+
+function renderExplicacoes(q) {
+  let out = "";
+  if (q.explicacao) {
+    out += `<p><strong>Por que ${escapeHtml(q.gabarito || "")} é a correta:</strong> ${escapeHtml(
+      q.explicacao
+    )}</p>`;
+  }
+  const expl = q.explicacoes_alternativas;
+  if (expl && Object.keys(expl).length) {
+    const gabarito = String(q.gabarito || "").trim().toUpperCase();
+    out +=
+      '<ul class="expl-alts">' +
+      Object.keys(expl)
+        .sort()
+        .map((letra) => {
+          const correta = letra.toUpperCase() === gabarito ? " correta" : "";
+          return `<li class="expl-alt${correta}"><strong>${escapeHtml(
+            letra
+          )}.</strong> ${escapeHtml(expl[letra])}</li>`;
+        })
+        .join("") +
+      "</ul>";
+  }
+  if (q.referencia) {
+    out += `<div class="ref">Referência: "${escapeHtml(q.referencia)}"</div>`;
+  }
+  return out;
 }
 
 function escapeHtml(s) {
@@ -233,19 +368,18 @@ $("#btn-gerar-ocr").addEventListener("click", async () => {
 
   $("#btn-gerar-ocr").disabled = true;
   const focoMsg = o.tema ? ` (foco: "${escapeHtml(o.tema)}")` : "";
-  showStatus(
-    `Gerando questões com Bedrock${focoMsg}… (pode levar alguns minutos)`,
-    "processing",
-    true
-  );
+  const maxMsg = o.max_chunks ? ` · até ${o.max_chunks} trecho(s)` : " · SEM limite de trechos (pode demorar muito)";
+  startGenTimer(`Gerando questões com Bedrock${focoMsg}${maxMsg}…`);
 
   try {
     const res = await fetch(`/gerar/ocr-job/${ocrJobId}?${params}`, { method: "POST" });
     if (!res.ok) await apiError(res);
     const data = await res.json();
-    showStatus("Questões geradas!", "ok");
+    stopGenTimer();
+    showStatus(`Questões geradas em ${Math.floor((Date.now() - genStart) / 1000)}s!`, "ok");
     renderQuestions(data);
   } catch (e) {
+    stopGenTimer();
     showStatus(e.message, "error");
   } finally {
     $("#btn-gerar-ocr").disabled = false;
@@ -323,15 +457,18 @@ $("#btn-pdf-gerar").addEventListener("click", async () => {
   appendOptForm(fd, o);
 
   $("#btn-pdf-gerar").disabled = true;
-  showStatus("Extraindo texto e gerando questões…", "processing", true);
+  const maxMsg = o.max_chunks ? ` · até ${o.max_chunks} trecho(s)` : " · SEM limite de trechos (pode demorar muito)";
+  startGenTimer(`Extraindo texto e gerando questões${maxMsg}…`);
 
   try {
     const res = await fetch("/gerar/pdf", { method: "POST", body: fd });
     if (!res.ok) await apiError(res);
     const data = await res.json();
-    showStatus("Pronto!", "ok");
+    stopGenTimer();
+    showStatus(`Pronto! ${Math.floor((Date.now() - genStart) / 1000)}s`, "ok");
     renderQuestions(data);
   } catch (e) {
+    stopGenTimer();
     showStatus(e.message, "error");
   } finally {
     $("#btn-pdf-gerar").disabled = false;

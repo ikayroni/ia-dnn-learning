@@ -96,8 +96,9 @@ def save_geracao(
             """INSERT INTO geracoes
                (documento_id, tema, palavras_chave, pagina_inicio, pagina_fim,
                 tipos, dificuldade, instrucoes_extras, num_questoes_por_chunk,
-                max_chunks, modelo, meta_json, questoes_count)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                max_chunks, idioma, estilo, num_alternativas, incluir_explicacao,
+                modelo, meta_json, questoes_count)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 documento_id,
                 parametros.get("tema"),
@@ -113,6 +114,10 @@ def save_geracao(
                 parametros.get("instrucoes_extras"),
                 parametros.get("num_questoes_por_chunk"),
                 parametros.get("max_chunks"),
+                parametros.get("idioma"),
+                parametros.get("estilo"),
+                parametros.get("num_alternativas"),
+                1 if parametros.get("incluir_explicacao") else 0,
                 meta.get("modelo"),
                 json.dumps(meta, ensure_ascii=False, default=str),
                 len(questoes),
@@ -125,8 +130,10 @@ def save_geracao(
             conn.execute(
                 """INSERT INTO questoes
                    (geracao_id, ordem, tipo, enunciado, alternativas_json,
-                    gabarito, dificuldade, chunk_id, pagina_inicio, pagina_fim)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    gabarito, dificuldade, chunk_id, pagina_inicio, pagina_fim,
+                    explicacao, explicacoes_alternativas_json, referencia,
+                    idioma, estilo)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     geracao_id,
                     i,
@@ -138,6 +145,13 @@ def save_geracao(
                     fonte.chunk_id if fonte else None,
                     fonte.pagina_inicio if fonte else None,
                     fonte.pagina_fim if fonte else None,
+                    q.explicacao,
+                    json.dumps(q.explicacoes_alternativas, ensure_ascii=False)
+                    if q.explicacoes_alternativas
+                    else None,
+                    q.referencia,
+                    q.idioma,
+                    q.estilo,
                 ),
             )
         conn.commit()
@@ -170,7 +184,8 @@ def get_documento(documento_id: int) -> Optional[dict[str, Any]]:
         doc = dict(row)
         gers = conn.execute(
             """SELECT id, tema, palavras_chave, pagina_inicio, pagina_fim,
-                      tipos, dificuldade, modelo, questoes_count, criado_em
+                      tipos, dificuldade, idioma, estilo, num_alternativas,
+                      modelo, questoes_count, criado_em
                FROM geracoes WHERE documento_id = ? ORDER BY criado_em DESC""",
             (documento_id,),
         ).fetchall()
@@ -207,12 +222,25 @@ def get_geracao_with_questoes(geracao_id: int) -> Optional[dict[str, Any]]:
             ger["meta"] = json.loads(ger["meta_json"])
         except Exception:
             ger["meta"] = None
+    def _safe_load(row, key):
+        try:
+            return json.loads(row[key]) if row[key] else None
+        except Exception:
+            return None
+
+    def _row_get(row, key, default=None):
+        try:
+            value = row[key]
+        except (IndexError, KeyError):
+            return default
+        return value if value is not None else default
+
     ger["questoes"] = [
         {
             "ordem": q["ordem"],
             "tipo": q["tipo"],
             "enunciado": q["enunciado"],
-            "alternativas": json.loads(q["alternativas_json"]) if q["alternativas_json"] else None,
+            "alternativas": _safe_load(q, "alternativas_json"),
             "gabarito": q["gabarito"],
             "dificuldade": q["dificuldade"],
             "fonte": {
@@ -220,6 +248,11 @@ def get_geracao_with_questoes(geracao_id: int) -> Optional[dict[str, Any]]:
                 "pagina_inicio": q["pagina_inicio"],
                 "pagina_fim": q["pagina_fim"],
             },
+            "explicacao": _row_get(q, "explicacao"),
+            "explicacoes_alternativas": _safe_load(q, "explicacoes_alternativas_json"),
+            "referencia": _row_get(q, "referencia"),
+            "idioma": _row_get(q, "idioma"),
+            "estilo": _row_get(q, "estilo"),
         }
         for q in qs
     ]
@@ -244,23 +277,54 @@ def export_geracao_csv(geracao_id: int) -> Optional[str]:
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter=";")
     writer.writerow(
-        ["ordem", "tipo", "enunciado", "alt_A", "alt_B", "alt_C", "alt_D", "gabarito", "dificuldade", "pagina"]
+        [
+            "ordem",
+            "tipo",
+            "idioma",
+            "estilo",
+            "enunciado",
+            "alt_A",
+            "alt_B",
+            "alt_C",
+            "alt_D",
+            "alt_E",
+            "alt_F",
+            "gabarito",
+            "dificuldade",
+            "pagina",
+            "explicacao",
+            "expl_A",
+            "expl_B",
+            "expl_C",
+            "expl_D",
+            "expl_E",
+            "expl_F",
+            "referencia",
+        ]
     )
     for q in ger["questoes"]:
-        alts = q["alternativas"] or []
-        alts = alts + [""] * (4 - len(alts)) if len(alts) < 4 else alts[:4]
+        alts = list(q.get("alternativas") or [])
+        alts = (alts + [""] * 6)[:6]
+        expl_alts = q.get("explicacoes_alternativas") or {}
         writer.writerow(
             [
                 q["ordem"] + 1,
                 q["tipo"],
+                q.get("idioma") or "",
+                q.get("estilo") or "",
                 q["enunciado"],
-                alts[0],
-                alts[1],
-                alts[2],
-                alts[3],
+                *alts,
                 q["gabarito"],
                 q["dificuldade"] or "",
                 q["fonte"]["pagina_inicio"] or "",
+                q.get("explicacao") or "",
+                expl_alts.get("A", ""),
+                expl_alts.get("B", ""),
+                expl_alts.get("C", ""),
+                expl_alts.get("D", ""),
+                expl_alts.get("E", ""),
+                expl_alts.get("F", ""),
+                q.get("referencia") or "",
             ]
         )
     return buf.getvalue()
