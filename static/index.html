@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gerador de Questões</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Gerador de Questões</h1>
+      <p>Upload de PDF · OCR (Textract) · Bedrock</p>
+    </header>
+
+    <div class="tabs">
+      <button type="button" class="tab active" data-panel="ocr">PDF escaneado (OCR)</button>
+      <button type="button" class="tab" data-panel="pdf">PDF com texto</button>
+      <button type="button" class="tab" data-panel="historico">Histórico</button>
+    </div>
+
+    <div id="panel-ocr" class="panel active">
+      <p class="hint">Para livros escaneados. Teste com poucas páginas antes do arquivo inteiro.</p>
+      <div id="drop-ocr" class="drop">
+        <input type="file" id="file-ocr" accept=".pdf,application/pdf" />
+        <div>Arraste o PDF aqui ou clique para escolher</div>
+        <div class="name"></div>
+      </div>
+      <div class="grid">
+        <div>
+          <label for="pagina_inicio">Página inicial (opcional)</label>
+          <input type="number" id="pagina_inicio" min="1" placeholder="ex: 1" />
+        </div>
+        <div>
+          <label for="pagina_fim">Página final (opcional)</label>
+          <input type="number" id="pagina_fim" min="1" placeholder="ex: 10" />
+        </div>
+      </div>
+      <button type="button" class="btn" id="btn-ocr-start">1. Iniciar OCR</button>
+      <button type="button" class="btn secondary" id="btn-descobrir-temas" disabled>2. Descobrir temas do material</button>
+      <button type="button" class="btn secondary" id="btn-gerar-ocr" disabled>3. Gerar questões</button>
+    </div>
+
+    <div id="panel-pdf" class="panel">
+      <p class="hint">PDF em que você consegue selecionar/copiar texto (sem scan).</p>
+      <div id="drop-pdf" class="drop">
+        <input type="file" id="file-pdf" accept=".pdf,application/pdf" />
+        <div>Arraste o PDF aqui ou clique para escolher</div>
+        <div class="name"></div>
+      </div>
+      <button type="button" class="btn" id="btn-pdf-gerar">Gerar questões</button>
+    </div>
+
+    <div id="panel-historico" class="panel">
+      <p class="hint">Documentos já processados e questões geradas (SQLite local).</p>
+      <button type="button" class="btn secondary" id="btn-historico-reload">Recarregar</button>
+      <div id="historico-lista"></div>
+    </div>
+
+    <fieldset class="opts">
+      <legend>Foco das questões (opcional)</legend>
+      <div>
+        <label for="tema">Tema / assunto</label>
+        <input type="text" id="tema" placeholder="ex: locação financeira, fotossíntese, IPv6..." />
+      </div>
+      <div>
+        <label for="palavras_chave">Palavras-chave (vírgula)</label>
+        <input type="text" id="palavras_chave" placeholder="ex: contrato, opção de compra" />
+      </div>
+      <div class="grid">
+        <div>
+          <label for="filtro_pag_ini">Página inicial</label>
+          <input type="number" id="filtro_pag_ini" min="1" placeholder="ex: 50" />
+        </div>
+        <div>
+          <label for="filtro_pag_fim">Página final</label>
+          <input type="number" id="filtro_pag_fim" min="1" placeholder="ex: 80" />
+        </div>
+      </div>
+      <div>
+        <label for="instrucoes_extras">Instruções extras</label>
+        <input type="text" id="instrucoes_extras" placeholder='ex: "questões aplicadas e com cenários"' />
+      </div>
+      <div id="temas-sugeridos" class="temas-sugeridos"></div>
+    </fieldset>
+
+    <div class="grid" style="margin-top: 1rem">
+      <div>
+        <label for="num_questoes">Questões por trecho</label>
+        <input type="number" id="num_questoes" value="2" min="1" max="10" />
+      </div>
+      <div>
+        <label for="max_chunks">Máx. trechos (custo)</label>
+        <input type="number" id="max_chunks" min="1" max="50" placeholder="ex: 5" />
+      </div>
+      <div>
+        <label for="tipos">Tipos</label>
+        <select id="tipos">
+          <option value="multipla_escolha">Múltipla escolha</option>
+          <option value="multipla_escolha,verdadeiro_falso">Múltipla + V/F</option>
+          <option value="multipla_escolha,verdadeiro_falso,dissertativa">Todos</option>
+        </select>
+      </div>
+      <div>
+        <label for="dificuldade">Dificuldade</label>
+        <select id="dificuldade">
+          <option value="">—</option>
+          <option value="facil">Fácil</option>
+          <option value="media">Média</option>
+          <option value="dificil">Difícil</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="status" class="status-box"></div>
+    <div id="results" class="results"></div>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

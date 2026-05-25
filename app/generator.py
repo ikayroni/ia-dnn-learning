@@ -1,0 +1,202 @@
+from __future__ import annotations
+
+from typing import Optional
+
+from app.bedrock import discover_topics, invoke_bedrock
+from app.chunker import chunk_text, filter_chunks
+from app.config import effective_bedrock_model_id, settings
+from app.ocr_jobs import load_document_from_job
+from app.pdf_extractor import ExtractedDocument, extract_text_from_pdf
+from app.schemas import Questao
+from app.storage import get_documento_by_job, save_geracao
+
+
+def _dedupe_questions(questoes: list[Questao]) -> list[Questao]:
+    seen: set[str] = set()
+    unique: list[Questao] = []
+    for q in questoes:
+        key = " ".join(q.enunciado.lower().split())[:200]
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(q)
+    return unique
+
+
+def _parse_questoes_from_llm(data: dict) -> list[Questao]:
+    raw_list = data.get("questoes", [])
+    return [Questao.model_validate(item) for item in raw_list]
+
+
+def generate_from_text(
+    text: str,
+    *,
+    num_questoes_por_chunk: int = 2,
+    tipos: Optional[list[str]] = None,
+    dificuldade: Optional[str] = None,
+    max_chunks: Optional[int] = None,
+    page_markers: Optional[list[tuple[int, int]]] = None,
+    page_count: Optional[int] = None,
+    ocr_source: Optional[str] = None,
+    tema: Optional[str] = None,
+    palavras_chave: Optional[list[str]] = None,
+    pagina_inicio: Optional[int] = None,
+    pagina_fim: Optional[int] = None,
+    instrucoes_extras: Optional[str] = None,
+) -> tuple[list[Questao], dict]:
+    chunks = chunk_text(
+        text,
+        chunk_size=settings.chunk_size_chars,
+        overlap=settings.chunk_overlap_chars,
+        page_markers=page_markers,
+    )
+
+    if not chunks:
+        raise ValueError("Texto vazio após processamento.")
+
+    total_chunks = len(chunks)
+    filtro_info: dict = {}
+
+    if palavras_chave or pagina_inicio or pagina_fim:
+        chunks, filtro_info = filter_chunks(
+            chunks,
+            keywords=palavras_chave,
+            pagina_inicio=pagina_inicio,
+            pagina_fim=pagina_fim,
+        )
+        if not chunks:
+            raise ValueError(
+                "Nenhum trecho casou com o filtro (palavras-chave/páginas). "
+                "Afrouxe os filtros."
+            )
+
+    limit = max_chunks or settings.max_chunks_per_request
+    chunks_filtrados_total = len(chunks)
+    if chunks_filtrados_total > limit:
+        chunks = chunks[:limit]
+        truncated = True
+    else:
+        truncated = False
+
+    all_questoes: list[Questao] = []
+    errors: list[str] = []
+
+    for chunk in chunks:
+        try:
+            result = invoke_bedrock(
+                chunk.text,
+                num_questions=num_questoes_por_chunk,
+                tipos=tipos,
+                dificuldade=dificuldade,
+                chunk_id=chunk.chunk_id,
+                page_start=chunk.page_start,
+                page_end=chunk.page_end,
+                tema=tema,
+                instrucoes_extras=instrucoes_extras,
+            )
+            all_questoes.extend(_parse_questoes_from_llm(result))
+        except Exception as e:
+            errors.append(f"chunk {chunk.chunk_id}: {e}")
+
+    all_questoes = _dedupe_questions(all_questoes)
+
+    meta = {
+        "chunks_processados": len(chunks),
+        "chunks_filtrados": chunks_filtrados_total,
+        "chunks_total": total_chunks,
+        "truncado": truncated,
+        "paginas": page_count,
+        "questoes_geradas": len(all_questoes),
+        "modelo": effective_bedrock_model_id(),
+        "ocr_source": ocr_source,
+        "tema": tema,
+        "palavras_chave": palavras_chave or None,
+        "intervalo_paginas": [pagina_inicio, pagina_fim] if (pagina_inicio or pagina_fim) else None,
+        "filtro": filtro_info or None,
+        "erros": errors if errors else None,
+    }
+    return all_questoes, meta
+
+
+def discover_topics_from_document(doc: ExtractedDocument, max_topics: int = 10) -> dict:
+    sample = doc.text
+    if len(sample) > 8000:
+        third = 8000 // 3
+        sample = sample[:third] + "\n\n" + sample[len(sample) // 2 : len(sample) // 2 + third] + "\n\n" + sample[-third:]
+    temas = discover_topics(sample, max_topics=max_topics)
+    return {
+        "temas": temas,
+        "paginas": doc.page_count,
+        "caracteres_amostrados": len(sample),
+        "modelo": effective_bedrock_model_id(),
+    }
+
+
+def generate_from_document(
+    doc: ExtractedDocument,
+    **kwargs,
+) -> tuple[list[Questao], dict]:
+    questoes, meta = generate_from_text(
+        doc.text,
+        page_markers=doc.page_markers,
+        page_count=doc.page_count,
+        **kwargs,
+    )
+    meta["paginas"] = doc.page_count
+    meta["caracteres_extraidos"] = len(doc.text)
+    return questoes, meta
+
+
+def generate_from_pdf_bytes(
+    data: bytes,
+    *,
+    usar_ocr_se_necessario: bool = False,
+    **kwargs,
+) -> tuple[list[Questao], dict]:
+    from app.pdf_extractor import pdf_has_native_text
+
+    if usar_ocr_se_necessario and not pdf_has_native_text(data):
+        raise ValueError(
+            "PDF parece escaneado. Primeiro rode POST /ocr/pdf e depois "
+            "POST /gerar/ocr-job/{job_id} quando status=succeeded."
+        )
+    doc = extract_text_from_pdf(data)
+    return generate_from_document(doc, **kwargs)
+
+
+def generate_from_ocr_job(
+    job_id: str,
+    **kwargs,
+) -> tuple[list[Questao], dict]:
+    doc = load_document_from_job(job_id)
+    questoes, meta = generate_from_document(
+        doc, ocr_source=f"textract_job:{job_id}", **kwargs
+    )
+    meta["ocr_job_id"] = job_id
+
+    documento = get_documento_by_job(job_id)
+    documento_id = documento["id"] if documento else None
+    parametros = {k: kwargs.get(k) for k in (
+        "tema", "palavras_chave", "pagina_inicio", "pagina_fim",
+        "tipos", "dificuldade", "instrucoes_extras",
+        "num_questoes_por_chunk", "max_chunks",
+    )}
+    try:
+        geracao_id = save_geracao(
+            documento_id=documento_id,
+            questoes=questoes,
+            meta=meta,
+            parametros=parametros,
+        )
+        meta["geracao_id"] = geracao_id
+        meta["documento_id"] = documento_id
+    except Exception as e:
+        meta["storage_error"] = str(e)
+    return questoes, meta
+
+
+def discover_topics_from_ocr_job(job_id: str, max_topics: int = 10) -> dict:
+    doc = load_document_from_job(job_id)
+    info = discover_topics_from_document(doc, max_topics=max_topics)
+    info["ocr_job_id"] = job_id
+    return info
