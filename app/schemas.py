@@ -123,6 +123,20 @@ class OcrJobsList(BaseModel):
     total: int
 
 
+class TentativaIn(BaseModel):
+    resposta: str = Field(..., min_length=1, description="Letra (A–F) ou texto da resposta")
+    tempo_resposta_ms: Optional[int] = Field(default=None, ge=0)
+    comentario: Optional[str] = Field(default=None, max_length=2000)
+
+
+class TentativaResultado(BaseModel):
+    tentativa_id: int
+    acertou: bool
+    gabarito: str
+    explicacao: Optional[str] = None
+    explicacoes_alternativas: Optional[Dict[str, str]] = None
+
+
 class TemaItem(BaseModel):
     titulo: str
     palavras_chave: List[str] = Field(default_factory=list)

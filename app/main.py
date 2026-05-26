@@ -30,13 +30,19 @@ from app.schemas import (
     OcrJobStatus,
     OcrJobsList,
     TemasResponse,
+    TentativaIn,
+    TentativaResultado,
 )
 from app.storage import (
     delete_documento,
     export_geracao_csv,
+    get_banco_estatisticas,
     get_documento,
     get_geracao_with_questoes,
+    get_questao_with_tentativas,
+    list_banco_questoes,
     list_documentos,
+    registrar_tentativa,
 )
 from fastapi.responses import PlainTextResponse, Response
 
@@ -479,6 +485,69 @@ def historico_geracao_csv(geracao_id: int):
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="questoes_{geracao_id}.csv"'},
     )
+
+
+@app.get("/banco/questoes")
+def banco_listar(
+    documento_id: Optional[int] = None,
+    geracao_id: Optional[int] = None,
+    tipo: Optional[str] = None,
+    dificuldade: Optional[str] = None,
+    idioma: Optional[str] = None,
+    estilo: Optional[str] = None,
+    so_erradas: bool = False,
+    so_nao_respondidas: bool = False,
+    busca: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """Lista questões do banco com filtros, paginação e contagem de tentativas/acertos."""
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit entre 1 e 200")
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset deve ser >= 0")
+    return list_banco_questoes(
+        documento_id=documento_id,
+        geracao_id=geracao_id,
+        tipo=tipo,
+        dificuldade=dificuldade,
+        idioma=idioma,
+        estilo=estilo,
+        so_erradas=so_erradas,
+        so_nao_respondidas=so_nao_respondidas,
+        busca=busca,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@app.get("/banco/questoes/{questao_id}")
+def banco_detalhe(questao_id: int):
+    q = get_questao_with_tentativas(questao_id)
+    if not q:
+        raise HTTPException(status_code=404, detail="Questão não encontrada")
+    return q
+
+
+@app.post("/banco/questoes/{questao_id}/tentativas", response_model=TentativaResultado)
+def banco_responder(questao_id: int, body: TentativaIn):
+    """Registra a resposta do usuário. Compara com o gabarito e devolve se acertou + explicações."""
+    try:
+        resultado = registrar_tentativa(
+            questao_id=questao_id,
+            resposta_usuario=body.resposta,
+            tempo_resposta_ms=body.tempo_resposta_ms,
+            comentario=body.comentario,
+        )
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    return TentativaResultado(**resultado)
+
+
+@app.get("/banco/estatisticas")
+def banco_estatisticas():
+    """Resumo do banco: totais, distribuição e top 10 questões mais erradas."""
+    return get_banco_estatisticas()
 
 
 @app.get("/temas/ocr-job/{job_id}", response_model=TemasResponse)

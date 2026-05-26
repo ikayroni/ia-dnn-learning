@@ -65,10 +65,22 @@ CREATE TABLE IF NOT EXISTS questoes (
     estilo TEXT
 );
 
+CREATE TABLE IF NOT EXISTS tentativas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    questao_id INTEGER NOT NULL REFERENCES questoes(id) ON DELETE CASCADE,
+    resposta_usuario TEXT NOT NULL,
+    acertou INTEGER NOT NULL,          -- 0/1
+    tempo_resposta_ms INTEGER,
+    comentario TEXT,
+    criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_doc_hash ON documentos(hash_sha256);
 CREATE INDEX IF NOT EXISTS idx_doc_job ON documentos(ocr_job_id);
 CREATE INDEX IF NOT EXISTS idx_ger_doc ON geracoes(documento_id);
 CREATE INDEX IF NOT EXISTS idx_q_ger ON questoes(geracao_id);
+CREATE INDEX IF NOT EXISTS idx_tent_q ON tentativas(questao_id);
+CREATE INDEX IF NOT EXISTS idx_tent_data ON tentativas(criado_em DESC);
 """
 
 
