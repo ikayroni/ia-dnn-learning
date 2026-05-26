@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import time
 import uuid
 from typing import Optional
@@ -10,6 +11,10 @@ from botocore.exceptions import ClientError
 from app.config import settings
 from app.pdf_extractor import ExtractedDocument
 from app.pdf_utils import prepare_pdf_for_textract, safe_pdf_filename
+
+
+def _olog(msg: str) -> None:
+    print(f"[ocr] {msg}", flush=True, file=sys.stdout)
 
 
 def _s3_client():
@@ -72,18 +77,32 @@ def wait_for_textract_job(
     *,
     poll_seconds: Optional[int] = None,
     on_status=None,
+    on_poll=None,
 ) -> None:
     poll = poll_seconds or settings.textract_poll_seconds
     client = _textract_client()
+    polls = 0
+    t_start = time.time()
     while True:
         resp = client.get_document_text_detection(JobId=job_id, MaxResults=1)
         status = resp["JobStatus"]
+        polls += 1
+        elapsed = int(time.time() - t_start)
+        if polls == 1 or polls % 6 == 0:
+            _olog(
+                f"textract poll #{polls} status={status} elapsed={elapsed}s "
+                f"job={job_id[:12]}…"
+            )
         if on_status:
             on_status(status)
+        if on_poll:
+            on_poll(polls, elapsed, status)
         if status == "SUCCEEDED":
+            _olog(f"textract concluido em {elapsed}s ({polls} polls)")
             return
         if status == "FAILED":
             msg = resp.get("StatusMessage", "OCR falhou no Textract.")
+            _olog(f"textract FAILED: {msg}")
             if "INVALID_DOCUMENT_TYPE" in msg:
                 raise RuntimeError(
                     f"{msg} — O Textract rejeitou o formato do PDF. "
@@ -136,15 +155,24 @@ def fetch_textract_text(job_id: str) -> ExtractedDocument:
     )
 
 
-def _run_once(pdf_bytes: bytes, filename: str, on_status=None) -> tuple[ExtractedDocument, str, str]:
+def _run_once(
+    pdf_bytes: bytes,
+    filename: str,
+    on_status=None,
+    on_poll=None,
+) -> tuple[ExtractedDocument, str, str]:
     """Uma tentativa: upload + Textract. Retorna doc, s3_key, textract_job_id."""
     if on_status:
         on_status("uploading_s3")
+    _olog(f"upload S3 ({len(pdf_bytes) / 1024:.0f} KB)…")
+    t0 = time.time()
     s3_key = upload_pdf_for_ocr(pdf_bytes, filename)
+    _olog(f"upload S3 OK em {time.time() - t0:.1f}s → {s3_key}")
 
     if on_status:
         on_status("starting_textract")
     textract_job_id = start_document_text_detection(s3_key)
+    _olog(f"Textract job iniciado: {textract_job_id[:24]}…")
 
     if on_status:
         on_status("waiting_textract")
@@ -153,11 +181,17 @@ def _run_once(pdf_bytes: bytes, filename: str, on_status=None) -> tuple[Extracte
         if on_status:
             on_status(f"textract_{s.lower()}")
 
-    wait_for_textract_job(textract_job_id, on_status=_status)
+    wait_for_textract_job(textract_job_id, on_status=_status, on_poll=on_poll)
 
     if on_status:
         on_status("fetching_results")
+    _olog("baixando resultados do Textract (paginas + paginação)…")
+    t1 = time.time()
     doc = fetch_textract_text(textract_job_id)
+    _olog(
+        f"resultados Textract: {doc.page_count} paginas · "
+        f"{len(doc.text)} chars em {time.time() - t1:.1f}s"
+    )
     return doc, s3_key, textract_job_id
 
 
@@ -166,6 +200,7 @@ def run_textract_ocr_pipeline(
     filename: str,
     *,
     on_status=None,
+    on_poll=None,
 ) -> ExtractedDocument:
     """
     Upload S3 → Textract assíncrono → texto por página.
@@ -176,13 +211,17 @@ def run_textract_ocr_pipeline(
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     page_count = len(doc)
     doc.close()
+    _olog(f"pipeline iniciado · arquivo={filename} · {page_count} paginas")
 
     prepared, mode = prepare_pdf_for_textract(pdf_bytes, force_rasterize=False)
+    _olog(f"PDF preparado modo={mode} · {len(prepared) / 1024:.0f} KB")
     if on_status:
         on_status(f"prepare_{mode}")
 
     try:
-        doc, _, textract_id = _run_once(prepared, filename, on_status=on_status)
+        doc, _, textract_id = _run_once(
+            prepared, filename, on_status=on_status, on_poll=on_poll
+        )
         return doc, textract_id
     except RuntimeError as e:
         err = str(e)
@@ -193,8 +232,11 @@ def run_textract_ocr_pipeline(
                 f"{err} Para PDFs com mais de 80 páginas, use pagina_inicio/pagina_fim "
                 "para testar um trecho menor antes do livro inteiro."
             ) from e
+        _olog("Textract recusou o PDF · retry com rasterização…")
         if on_status:
             on_status("retry_rasterize")
         prepared2, _ = prepare_pdf_for_textract(pdf_bytes, force_rasterize=True)
-        doc, _, textract_id = _run_once(prepared2, filename, on_status=on_status)
+        doc, _, textract_id = _run_once(
+            prepared2, filename, on_status=on_status, on_poll=on_poll
+        )
         return doc, textract_id

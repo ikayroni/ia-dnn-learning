@@ -10,7 +10,13 @@ from app.config import effective_bedrock_model_id, settings
 from app.ocr_jobs import load_document_from_job
 from app.pdf_extractor import ExtractedDocument, extract_text_from_pdf
 from app.schemas import Questao
-from app.storage import get_documento_by_job, save_geracao
+from app.storage import (
+    get_documento_by_hash,
+    get_documento_by_job,
+    save_geracao,
+    sha256_bytes,
+    upsert_documento,
+)
 
 
 def _log(msg: str) -> None:
@@ -192,18 +198,67 @@ def generate_from_document(
 def generate_from_pdf_bytes(
     data: bytes,
     *,
-    usar_ocr_se_necessario: bool = False,
+    filename: str = "documento.pdf",
     **kwargs,
 ) -> tuple[list[Questao], dict]:
     from app.pdf_extractor import pdf_has_native_text
 
-    if usar_ocr_se_necessario and not pdf_has_native_text(data):
+    if not pdf_has_native_text(data):
         raise ValueError(
-            "PDF parece escaneado. Primeiro rode POST /ocr/pdf e depois "
-            "POST /gerar/ocr-job/{job_id} quando status=succeeded."
+            "PDF parece escaneado (sem texto nativo selecionavel). "
+            "Use o fluxo de OCR: POST /ocr/pdf -> aguarde status=succeeded em "
+            "GET /ocr/jobs/{job_id} -> POST /gerar/ocr-job/{job_id}."
         )
+
+    hash_id = sha256_bytes(data)
+    existente = get_documento_by_hash(hash_id)
+    if existente:
+        documento_id = int(existente["id"])
+        _log(f"PDF reaproveitado do historico · documento_id={documento_id}")
+    else:
+        documento_id = None  # criamos depois com pag_count e chars reais
+
     doc = extract_text_from_pdf(data)
-    return generate_from_document(doc, **kwargs)
+    questoes, meta = generate_from_document(doc, **kwargs)
+
+    if documento_id is None:
+        documento_id = upsert_documento(
+            nome_arquivo=filename,
+            hash_sha256=hash_id,
+            paginas=doc.page_count,
+            caracteres=len(doc.text),
+            ocr_job_id=None,
+            fonte="pdf_nativo",
+        )
+    else:
+        upsert_documento(
+            nome_arquivo=filename,
+            hash_sha256=hash_id,
+            paginas=doc.page_count,
+            caracteres=len(doc.text),
+            ocr_job_id=None,
+            fonte="pdf_nativo",
+        )
+
+    parametros = {k: kwargs.get(k) for k in (
+        "tema", "palavras_chave", "pagina_inicio", "pagina_fim",
+        "tipos", "dificuldade", "instrucoes_extras",
+        "num_questoes_por_chunk", "max_chunks",
+        "idioma", "estilo", "num_alternativas", "incluir_explicacao",
+    )}
+    try:
+        geracao_id = save_geracao(
+            documento_id=documento_id,
+            questoes=questoes,
+            meta=meta,
+            parametros=parametros,
+        )
+        meta["geracao_id"] = geracao_id
+        meta["documento_id"] = documento_id
+        _log(f"geracao salva · documento_id={documento_id} geracao_id={geracao_id}")
+    except Exception as e:
+        meta["storage_error"] = str(e)
+    return questoes, meta
 
 
 def generate_from_ocr_job(
@@ -243,3 +298,48 @@ def discover_topics_from_ocr_job(job_id: str, max_topics: int = 10) -> dict:
     info = discover_topics_from_document(doc, max_topics=max_topics)
     info["ocr_job_id"] = job_id
     return info
+
+
+def generate_from_documento_id(documento_id: int, **kwargs) -> tuple[list[Questao], dict]:
+    """Reusa um documento já salvo no histórico para gerar novas variações de questões.
+
+    - Se o documento veio de OCR, carrega o texto do job OCR.
+    - Caso contrário, exige que o documento tenha o `ocr_job_id` salvo.
+    Não recebe bytes do PDF — economiza upload e custo de extração.
+    """
+    from app.storage import get_documento_row
+
+    row = get_documento_row(documento_id)
+    if not row:
+        raise KeyError(f"documento_id {documento_id} não encontrado")
+    ocr_job_id = row.get("ocr_job_id")
+    if not ocr_job_id:
+        raise ValueError(
+            "Este documento não tem texto OCR persistido para regerar. "
+            "Para variações sobre PDF nativo, reenvie o arquivo via POST /gerar/pdf "
+            "(o sistema vai reaproveitar o histórico pelo hash do PDF)."
+        )
+    doc = load_document_from_job(ocr_job_id)
+    questoes, meta = generate_from_document(
+        doc, ocr_source=f"textract_job:{ocr_job_id}", **kwargs
+    )
+    meta["ocr_job_id"] = ocr_job_id
+    meta["documento_id"] = documento_id
+
+    parametros = {k: kwargs.get(k) for k in (
+        "tema", "palavras_chave", "pagina_inicio", "pagina_fim",
+        "tipos", "dificuldade", "instrucoes_extras",
+        "num_questoes_por_chunk", "max_chunks",
+        "idioma", "estilo", "num_alternativas", "incluir_explicacao",
+    )}
+    try:
+        geracao_id = save_geracao(
+            documento_id=documento_id,
+            questoes=questoes,
+            meta=meta,
+            parametros=parametros,
+        )
+        meta["geracao_id"] = geracao_id
+    except Exception as e:
+        meta["storage_error"] = str(e)
+    return questoes, meta

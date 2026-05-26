@@ -30,6 +30,15 @@ def get_documento_by_job(ocr_job_id: str) -> Optional[dict[str, Any]]:
     return dict(row) if row else None
 
 
+def get_documento_row(documento_id: int) -> Optional[dict[str, Any]]:
+    """Retorna a linha crua do documento (sem juntar gerações)."""
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM documentos WHERE id = ?", (documento_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def upsert_documento(
     *,
     nome_arquivo: str,

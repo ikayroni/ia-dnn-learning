@@ -108,7 +108,19 @@ class OcrJobStatus(BaseModel):
     error: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    elapsed_seconds: Optional[int] = None
+    textract_polls: Optional[int] = None
+    textract_status: Optional[str] = None
+    textract_elapsed_seconds: Optional[int] = None
+    textract_job_id: Optional[str] = None
     gerar_questoes_url: Optional[str] = None
+
+
+class OcrJobsList(BaseModel):
+    jobs: List["OcrJobStatus"]
+    total: int
 
 
 class TemaItem(BaseModel):

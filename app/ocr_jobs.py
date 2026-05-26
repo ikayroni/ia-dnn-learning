@@ -7,6 +7,95 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+
+class _Cancelled(RuntimeError):
+    """Cancelamento solicitado pelo usuário."""
+
+
+_CANCEL_FLAGS: set[str] = set()
+_CANCEL_LOCK = threading.Lock()
+
+
+_ACTIVE_THREADS: dict[str, threading.Thread] = {}
+_ACTIVE_LOCK = threading.Lock()
+
+
+def _register_thread(job_id: str, thread: threading.Thread) -> None:
+    with _ACTIVE_LOCK:
+        _ACTIVE_THREADS[job_id] = thread
+
+
+def _unregister_thread(job_id: str) -> None:
+    with _ACTIVE_LOCK:
+        _ACTIVE_THREADS.pop(job_id, None)
+
+
+def has_active_thread(job_id: str) -> bool:
+    with _ACTIVE_LOCK:
+        t = _ACTIVE_THREADS.get(job_id)
+    return bool(t and t.is_alive())
+
+
+def request_cancel(job_id: str) -> bool:
+    """Sinaliza cancelamento e marca status como 'cancelled' no JSON imediatamente.
+
+    Retorna True se havia thread viva (cancelamento "soft" — vai parar no próximo poll);
+    False se o job era órfão (sem thread) — marca direto como cancelled.
+    """
+    with _CANCEL_LOCK:
+        _CANCEL_FLAGS.add(job_id)
+    alive = has_active_thread(job_id)
+    msg = (
+        "Cancelado pelo usuário. O Textract pode continuar processando na AWS "
+        "(a cobrança das páginas já enviadas se aplica)."
+        if alive
+        else "Job órfão (sem thread ativa) — marcado como cancelado. "
+        "Provavelmente o servidor reiniciou durante o processamento."
+    )
+    try:
+        update_job(job_id, status="cancelled", phase="cancelled", error=msg)
+    except KeyError:
+        pass
+    return alive
+
+
+def is_cancelled(job_id: str) -> bool:
+    with _CANCEL_LOCK:
+        return job_id in _CANCEL_FLAGS
+
+
+def _clear_cancel(job_id: str) -> None:
+    with _CANCEL_LOCK:
+        _CANCEL_FLAGS.discard(job_id)
+
+
+def cleanup_orphan_jobs() -> int:
+    """Marca como 'interrupted' jobs que ficaram 'processing' sem thread viva
+    (acontece quando o servidor reinicia durante OCR). Chamado no startup.
+
+    Retorna quantos jobs foram limpos.
+    """
+    cleaned = 0
+    for path in _jobs_dir().glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if data.get("status") in ("pending", "processing"):
+            if has_active_thread(data.get("job_id", "")):
+                continue
+            data["status"] = "interrupted"
+            data["phase"] = "interrupted"
+            data["error"] = (
+                "Interrompido: o servidor reiniciou durante o processamento "
+                "(thread perdida). O Textract pode ter continuado na AWS; "
+                "use o histórico ou reenvie o PDF para um novo OCR."
+            )
+            data["finished_at"] = _now()
+            _save(data)
+            cleaned += 1
+    return cleaned
+
 from app.config import BASE_DIR, settings
 from app.pdf_extractor import ExtractedDocument, document_to_dict, document_from_dict
 from app.pdf_utils import slice_pdf_pages
@@ -90,14 +179,38 @@ def _run_ocr_thread(
     filename: str,
     documento_id: Optional[int] = None,
 ) -> None:
+    import time as _time
+
+    t_start = _time.time()
     try:
-        update_job(job_id, status="processing")
+        update_job(job_id, status="processing", started_at=_now())
+
+        def check_cancel():
+            return is_cancelled(job_id)
 
         def on_status(phase: str):
-            update_job(job_id, status="processing", phase=phase)
+            if check_cancel():
+                raise _Cancelled("cancelado pelo usuário")
+            update_job(
+                job_id,
+                status="processing",
+                phase=phase,
+                elapsed_seconds=int(_time.time() - t_start),
+            )
+
+        def on_poll(polls: int, elapsed: int, textract_status: str):
+            if check_cancel():
+                raise _Cancelled("cancelado pelo usuário")
+            update_job(
+                job_id,
+                textract_polls=polls,
+                textract_status=textract_status,
+                textract_elapsed_seconds=elapsed,
+                elapsed_seconds=int(_time.time() - t_start),
+            )
 
         doc, textract_job_id = run_textract_ocr_pipeline(
-            pdf_bytes, filename, on_status=on_status
+            pdf_bytes, filename, on_status=on_status, on_poll=on_poll
         )
         update_job(
             job_id,
@@ -108,6 +221,8 @@ def _run_ocr_thread(
             document=document_to_dict(doc),
             error=None,
             textract_job_id=textract_job_id,
+            elapsed_seconds=int(_time.time() - t_start),
+            finished_at=_now(),
         )
         if documento_id:
             update_documento_ocr_done(
@@ -116,8 +231,39 @@ def _run_ocr_thread(
                 caracteres=len(doc.text),
                 ocr_job_id=job_id,
             )
+    except _Cancelled:
+        update_job(
+            job_id,
+            status="cancelled",
+            phase="cancelled",
+            error="Cancelado pelo usuário. O Textract da AWS pode continuar processando "
+                  "do lado do servidor (a AWS não expõe API de cancelamento); a cobrança "
+                  "das páginas já enviadas se aplica.",
+            elapsed_seconds=int(_time.time() - t_start),
+            finished_at=_now(),
+        )
     except Exception as e:
-        update_job(job_id, status="failed", phase="error", error=str(e))
+        if is_cancelled(job_id):
+            update_job(
+                job_id,
+                status="cancelled",
+                phase="cancelled",
+                error=f"Cancelado durante: {e}",
+                elapsed_seconds=int(_time.time() - t_start),
+                finished_at=_now(),
+            )
+        else:
+            update_job(
+                job_id,
+                status="failed",
+                phase="error",
+                error=str(e),
+                elapsed_seconds=int(_time.time() - t_start),
+                finished_at=_now(),
+            )
+    finally:
+        _clear_cancel(job_id)
+        _unregister_thread(job_id)
 
 
 def start_ocr_job(
@@ -167,8 +313,25 @@ def start_ocr_job(
         args=(job_id, pdf_bytes, filename, documento_id),
         daemon=True,
     )
+    _register_thread(job_id, thread)
     thread.start()
     return job_id, False
+
+
+def list_jobs(only_active: bool = False) -> list[dict[str, Any]]:
+    """Lista jobs OCR existentes (pasta data/ocr_jobs/*.json), ordenados do mais recente."""
+    jobs: list[dict[str, Any]] = []
+    for path in _jobs_dir().glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if only_active and data.get("status") not in ("pending", "processing"):
+            continue
+        data.pop("document", None)  # nao trafegar o texto cru
+        jobs.append(data)
+    jobs.sort(key=lambda j: j.get("created_at", ""), reverse=True)
+    return jobs
 
 
 def load_document_from_job(job_id: str) -> ExtractedDocument:

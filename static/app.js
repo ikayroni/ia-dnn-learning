@@ -321,8 +321,56 @@ $("#btn-ocr-start").addEventListener("click", async () => {
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(pollOcrJob, 5000);
+  const btnCancel = document.querySelector("#btn-cancelar-ocr");
+  if (btnCancel) btnCancel.style.display = "";
   pollOcrJob();
 }
+
+function stopCancelButton() {
+  const btnCancel = document.querySelector("#btn-cancelar-ocr");
+  if (btnCancel) btnCancel.style.display = "none";
+}
+
+document.addEventListener("click", async (ev) => {
+  if (ev.target && ev.target.id === "btn-cancelar-ocr") {
+    if (!ocrJobId) return;
+    if (!confirm(
+      "Cancelar este OCR?\n\nIMPORTANTE: O Textract da AWS pode continuar processando do lado do servidor — a cobrança das páginas já enviadas continua valendo. A gente só para de acompanhar."
+    )) return;
+    ev.target.disabled = true;
+    try {
+      const res = await fetch(`/ocr/jobs/${ocrJobId}/cancel`, { method: "POST" });
+      if (!res.ok) await apiError(res);
+      showStatus("Cancelamento solicitado. Aguardando próximo poll para confirmar…", "processing", true);
+    } catch (e) {
+      showStatus(e.message, "error");
+    } finally {
+      ev.target.disabled = false;
+    }
+  }
+});
+
+function fmtSeconds(total) {
+  if (!total && total !== 0) return "?";
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+const PHASE_LABEL = {
+  uploading_s3: "Enviando PDF para o S3",
+  starting_textract: "Iniciando Textract",
+  waiting_textract: "Aguardando Textract",
+  textract_in_progress: "Textract processando…",
+  textract_succeeded: "Textract concluiu",
+  fetching_results: "Baixando texto extraído",
+  prepare_normalize: "Normalizando PDF",
+  prepare_rasterize: "Rasterizando PDF (modo robusto)",
+  retry_rasterize: "Tentando novamente em modo robusto",
+  cancelled: "Cancelado",
+  done: "Pronto",
+  error: "Erro",
+};
 
 async function pollOcrJob() {
   if (!ocrJobId) return;
@@ -330,23 +378,49 @@ async function pollOcrJob() {
     const res = await fetch(`/ocr/jobs/${ocrJobId}`);
     if (!res.ok) await apiError(res);
     const j = await res.json();
-    const phase = j.phase ? ` (${j.phase})` : "";
     if (j.status === "succeeded") {
       clearInterval(pollTimer);
       pollTimer = null;
+      stopCancelButton();
       showStatus(
-        `OCR concluído! ${j.paginas_ocr || "?"} páginas · ${(j.caracteres || 0).toLocaleString()} caracteres.`,
+        `OCR concluído em ${fmtSeconds(j.elapsed_seconds)}! ${j.paginas_ocr || "?"} páginas · ${(j.caracteres || 0).toLocaleString()} caracteres.`,
         "ok"
       );
       $("#btn-gerar-ocr").disabled = false;
       $("#btn-descobrir-temas").disabled = false;
-    } else if (j.status === "failed") {
+      return;
+    }
+    if (j.status === "failed") {
       clearInterval(pollTimer);
       pollTimer = null;
+      stopCancelButton();
       showStatus(`OCR falhou: ${j.error || "erro desconhecido"}`, "error");
-    } else {
-      showStatus(`Status: <strong>${j.status}</strong>${phase}`, "processing", true);
+      return;
     }
+    if (j.status === "cancelled") {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      stopCancelButton();
+      showStatus(
+        `OCR cancelado. ${j.error || ""}`,
+        "error"
+      );
+      return;
+    }
+
+    const phaseLabel = PHASE_LABEL[j.phase] || j.phase || j.status;
+    const parts = [`<strong>${escapeHtml(phaseLabel)}</strong>`];
+    if (j.total_paginas_arquivo) {
+      const range =
+        j.pagina_inicio || j.pagina_fim
+          ? `pgs ${j.pagina_inicio || 1}–${j.pagina_fim || j.total_paginas_arquivo}`
+          : `${j.total_paginas_arquivo} pgs no total`;
+      parts.push(range);
+    }
+    if (j.elapsed_seconds != null) parts.push(`tempo: ${fmtSeconds(j.elapsed_seconds)}`);
+    if (j.textract_polls)
+      parts.push(`Textract polls: ${j.textract_polls} (${fmtSeconds(j.textract_elapsed_seconds || 0)})`);
+    showStatus(parts.join(" · "), "processing", true);
   } catch (e) {
     showStatus(e.message, "error");
   }

@@ -10,16 +10,25 @@ from fastapi.staticfiles import StaticFiles
 from app.config import BASE_DIR, settings
 from app.generator import (
     discover_topics_from_ocr_job,
+    generate_from_documento_id,
     generate_from_ocr_job,
     generate_from_pdf_bytes,
     generate_from_text,
 )
-from app.ocr_jobs import get_job, start_ocr_job
+from app.ocr_jobs import (
+    cleanup_orphan_jobs,
+    get_job,
+    has_active_thread,
+    list_jobs,
+    request_cancel,
+    start_ocr_job,
+)
 from app.schemas import (
     GerarResponse,
     GerarTextoRequest,
     OcrJobCreated,
     OcrJobStatus,
+    OcrJobsList,
     TemasResponse,
 )
 from app.storage import (
@@ -44,6 +53,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def _cleanup_orphans_on_startup() -> None:
+    cleaned = cleanup_orphan_jobs()
+    if cleaned:
+        print(f"[startup] {cleaned} job(s) OCR órfão(s) marcados como 'interrupted'.", flush=True)
 
 MAX_BYTES = settings.max_pdf_upload_mb * 1024 * 1024
 
@@ -186,14 +202,10 @@ async def iniciar_ocr_pdf(
     )
 
 
-@app.get("/ocr/jobs/{job_id}", response_model=OcrJobStatus)
-def status_ocr(job_id: str):
-    data = get_job(job_id)
-    if not data:
-        raise HTTPException(status_code=404, detail="Job não encontrado")
-    gerar_url = None
-    if data.get("status") == "succeeded":
-        gerar_url = f"/gerar/ocr-job/{job_id}"
+def _job_to_status(data: dict) -> OcrJobStatus:
+    gerar_url = (
+        f"/gerar/ocr-job/{data['job_id']}" if data.get("status") == "succeeded" else None
+    )
     return OcrJobStatus(
         job_id=data["job_id"],
         status=data["status"],
@@ -207,7 +219,55 @@ def status_ocr(job_id: str):
         error=data.get("error"),
         created_at=data.get("created_at"),
         updated_at=data.get("updated_at"),
+        started_at=data.get("started_at"),
+        finished_at=data.get("finished_at"),
+        elapsed_seconds=data.get("elapsed_seconds"),
+        textract_polls=data.get("textract_polls"),
+        textract_status=data.get("textract_status"),
+        textract_elapsed_seconds=data.get("textract_elapsed_seconds"),
+        textract_job_id=data.get("textract_job_id"),
         gerar_questoes_url=gerar_url,
+    )
+
+
+@app.get("/ocr/jobs/{job_id}", response_model=OcrJobStatus)
+def status_ocr(job_id: str):
+    data = get_job(job_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Job não encontrado")
+    return _job_to_status(data)
+
+
+@app.post("/ocr/jobs/{job_id}/cancel", response_model=OcrJobStatus)
+def cancelar_ocr_job(job_id: str):
+    """
+    Sinaliza cancelamento do job OCR. Importante:
+    - O Textract da AWS NÃO expõe API de cancelamento de job assíncrono.
+    - O processamento na AWS pode continuar até terminar (e ser cobrado);
+      apenas paramos de acompanhar e marcamos o job como `cancelled`.
+    - Se o job é órfão (sem thread ativa, ex.: servidor reiniciou),
+      o status muda para `cancelled` na hora.
+    """
+    data = get_job(job_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Job não encontrado")
+    if data.get("status") in ("succeeded", "failed", "cancelled", "interrupted"):
+        return _job_to_status(data)
+    request_cancel(job_id)
+    refreshed = get_job(job_id) or data
+    return _job_to_status(refreshed)
+
+
+@app.get("/ocr/jobs", response_model=OcrJobsList)
+def listar_ocr_jobs(only_active: bool = False, limit: int = 50):
+    """Lista jobs OCR salvos em disco. Use only_active=true para ver só os em processamento."""
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit entre 1 e 200")
+    all_jobs = list_jobs(only_active=only_active)
+    total = len(all_jobs)
+    return OcrJobsList(
+        jobs=[_job_to_status(j) for j in all_jobs[:limit]],
+        total=total,
     )
 
 
@@ -262,6 +322,7 @@ async def gerar_pdf(
     try:
         questoes, meta = generate_from_pdf_bytes(
             data,
+            filename=arquivo.filename or "documento.pdf",
             num_questoes_por_chunk=num_questoes_por_chunk,
             tipos=tipo_list,
             dificuldade=dificuldade,
@@ -328,6 +389,52 @@ def gerar_de_ocr_job(
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
+    return GerarResponse(questoes=questoes, meta=meta)
+
+
+@app.post("/gerar/documento/{documento_id}", response_model=GerarResponse)
+def gerar_de_documento(
+    documento_id: int,
+    num_questoes_por_chunk: int = 2,
+    tipos: str = "multipla_escolha",
+    dificuldade: Optional[str] = None,
+    max_chunks: Optional[int] = None,
+    tema: Optional[str] = None,
+    palavras_chave: Optional[str] = None,
+    pagina_inicio: Optional[int] = None,
+    pagina_fim: Optional[int] = None,
+    instrucoes_extras: Optional[str] = None,
+    idioma: str = "pt",
+    estilo: str = "clinico",
+    num_alternativas: int = 5,
+    incluir_explicacao: bool = True,
+):
+    """Reusa um documento já salvo no histórico (atalho — não precisa reenviar o PDF)."""
+    tipo_list = _parse_tipos(tipos)
+    keywords = _parse_keywords(palavras_chave)
+    try:
+        questoes, meta = generate_from_documento_id(
+            documento_id,
+            num_questoes_por_chunk=num_questoes_por_chunk,
+            tipos=tipo_list,
+            dificuldade=dificuldade,
+            max_chunks=max_chunks,
+            tema=tema,
+            palavras_chave=keywords,
+            pagina_inicio=pagina_inicio,
+            pagina_fim=pagina_fim,
+            instrucoes_extras=instrucoes_extras,
+            idioma=idioma,
+            estilo=estilo,
+            num_alternativas=num_alternativas,
+            incluir_explicacao=incluir_explicacao,
+        )
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
     return GerarResponse(questoes=questoes, meta=meta)
 
 
