@@ -20,7 +20,12 @@ _BEDROCK_CFG = Config(
 
 
 def _blog(msg: str) -> None:
-    print(f"[bedrock] {msg}", flush=True, file=sys.stdout)
+    from app.console_io import safe_print
+
+    try:
+        safe_print(f"[bedrock] {msg}")
+    except Exception:
+        pass
 
 TIPOS_QUESTAO = ("multipla_escolha", "verdadeiro_falso", "dissertativa")
 
@@ -227,7 +232,7 @@ def _handle_bedrock_error(model_id: str, code: str, msg: str) -> None:
     if code == "AccessDeniedException":
         raise RuntimeError(
             f"Acesso negado ao Bedrock ({model_id}). "
-            "Habilite o modelo em Bedrock → Model access (mesma região do .env)."
+            "Habilite o modelo em Bedrock -> Model access (mesma regiao do .env)."
         )
     if "inference profile" in lower:
         raise RuntimeError(
@@ -238,11 +243,11 @@ def _handle_bedrock_error(model_id: str, code: str, msg: str) -> None:
             f"Erro Bedrock: {msg} "
             "O Haiku/Claude legado está bloqueado. No .env troque para um modelo ATIVO, ex.: "
             "BEDROCK_MODEL_ID=us.amazon.nova-lite-v1:0 "
-            "ou global.anthropic.claude-sonnet-4-20250514-v1:0 (veja Bedrock → Model catalog)."
+            "ou global.anthropic.claude-sonnet-4-20250514-v1:0 (veja Bedrock -> Model catalog)."
         )
     if "use case details" in lower:
         raise RuntimeError(
-            f"Erro Bedrock: {msg} Preencha o formulário Anthropic em Bedrock → Model access."
+            f"Erro Bedrock: {msg} Preencha o formulario Anthropic em Bedrock -> Model access."
         )
     raise RuntimeError(f"Erro Bedrock: {msg}")
 
@@ -295,7 +300,7 @@ def invoke_bedrock(
 
     max_tokens = 4500 if incluir_explicacao else 2500
     _blog(
-        f"converse → modelo={model_id} chunk_id={chunk_id} "
+        f"converse -> modelo={model_id} chunk_id={chunk_id} "
         f"chars_in={len(user_prompt) + len(system_prompt)} max_tokens={max_tokens}"
     )
     t0 = time.time()
@@ -315,7 +320,7 @@ def invoke_bedrock(
             },
         )
     except ReadTimeoutError as e:
-        _blog(f"TIMEOUT após {time.time() - t0:.1f}s chunk_id={chunk_id}")
+        _blog(f"TIMEOUT apos {time.time() - t0:.1f}s chunk_id={chunk_id}")
         raise RuntimeError(
             "Bedrock demorou mais de 120s (timeout). Reduza o tamanho do trecho "
             "(CHUNK_SIZE_CHARS no .env) ou desligue 'Resposta comentada'."
@@ -329,8 +334,8 @@ def invoke_bedrock(
     raw_text = _extract_text_from_converse(response)
     usage = response.get("usage", {})
     _blog(
-        f"converse OK em {elapsed:.1f}s · tokens in={usage.get('inputTokens')} "
-        f"out={usage.get('outputTokens')} · chars_out={len(raw_text)}"
+        f"converse OK em {elapsed:.1f}s | tokens in={usage.get('inputTokens')} "
+        f"out={usage.get('outputTokens')} | chars_out={len(raw_text)}"
     )
     return _parse_json_response(raw_text)
 
@@ -378,3 +383,169 @@ TEXTO (amostra):
     if not isinstance(temas, list):
         return []
     return temas[:max_topics]
+
+
+def _converse_json(system: str, user: str, *, max_tokens: int = 4000, temperature: float = 0.25) -> dict:
+    client = boto3.client(
+        "bedrock-runtime",
+        region_name=settings.aws_region,
+        config=_BEDROCK_CFG,
+    )
+    model_id = effective_bedrock_model_id()
+    t0 = time.time()
+    try:
+        response = client.converse(
+            modelId=model_id,
+            system=[{"text": system}],
+            messages=[{"role": "user", "content": [{"text": user}]}],
+            inferenceConfig={"maxTokens": max_tokens, "temperature": temperature},
+        )
+    except ReadTimeoutError as e:
+        raise RuntimeError(
+            "Bedrock demorou mais de 120s (timeout). Tente menos semanas ou um material menor."
+        ) from e
+    except ClientError as e:
+        err = e.response.get("Error", {})
+        _handle_bedrock_error(model_id, err.get("Code", ""), err.get("Message", str(e)))
+    elapsed = time.time() - t0
+    raw = _extract_text_from_converse(response)
+    usage = response.get("usage", {})
+    _blog(
+        f"converse JSON em {elapsed:.1f}s | in={usage.get('inputTokens')} "
+        f"out={usage.get('outputTokens')}"
+    )
+    return _parse_json_response(raw)
+
+
+def generate_trilha_plano(
+    *,
+    sample_text: str,
+    paginas: Optional[int],
+    temas: list[dict],
+    objetivo: str,
+    semanas: int,
+    horas_por_dia: float,
+    dias_estudo: int,
+    instrucoes_extras: Optional[str] = None,
+) -> dict:
+    """Gera plano estruturado da trilha (etapas diárias)."""
+    temas_txt = json.dumps(temas, ensure_ascii=False) if temas else "[]"
+    extras = f"\nInstruções adicionais: {instrucoes_extras}\n" if instrucoes_extras else ""
+    minutos_dia = int(horas_por_dia * 60)
+
+    system = (
+        "Você é um planejador de estudos médicos (Revalida, Residência, USMLE). "
+        "Monte trilhas realistas com base no material fornecido. "
+        "Responda APENAS com JSON válido, sem markdown."
+    )
+    user = f"""Crie um plano de estudos com exatamente {dias_estudo} etapas (uma por dia de estudo).
+
+Contexto:
+- Objetivo do aluno: {objetivo}
+- Duração: {semanas} semana(s), ~{horas_por_dia} h/dia (~{minutos_dia} min/dia por etapa)
+- Páginas totais do material (se conhecido): {paginas or "desconhecido"}
+- Temas identificados no material: {temas_txt}
+{extras}
+Regras:
+- Cada etapa deve ter páginas coerentes (pagina_inicio <= pagina_fim) quando o material tiver páginas.
+- Distribua o conteúdo ao longo dos {dias_estudo} dias sem pular grandes lacunas.
+- Inclua tema e 2–5 palavras_chave por etapa para gerar questões depois.
+- duracao_minutos por etapa: próximo de {minutos_dia} (pode variar ±15 min).
+
+Formato JSON obrigatório:
+{{
+  "titulo": "título curto da trilha",
+  "resumo": "1–3 frases sobre o plano",
+  "etapas": [
+    {{
+      "dia": 1,
+      "modulo": "nome do módulo/bloco",
+      "titulo": "título da etapa",
+      "objetivo": "o que o aluno deve dominar",
+      "pagina_inicio": 1,
+      "pagina_fim": 30,
+      "tema": "tema principal",
+      "palavras_chave": ["kw1", "kw2"],
+      "duracao_minutos": {minutos_dia}
+    }}
+  ]
+}}
+
+TEXTO DO MATERIAL (amostra):
+{sample_text[:10000]}"""
+
+    data = _converse_json(system, user, max_tokens=6000, temperature=0.25)
+    etapas = data.get("etapas", [])
+    if not isinstance(etapas, list) or not etapas:
+        raise ValueError("LLM não retornou etapas válidas para a trilha.")
+    return data
+
+
+def generate_sala_dia(
+    *,
+    etapa: dict,
+    documento_id: int,
+    horas_por_dia: float,
+    desempenho: Optional[dict] = None,
+    instrucoes_extras: Optional[str] = None,
+) -> dict:
+    """Gera atividades da sala de estudo para uma etapa."""
+    minutos_dia = int(horas_por_dia * 60)
+    desempenho_txt = json.dumps(desempenho or {}, ensure_ascii=False)
+    extras = f"\nInstruções: {instrucoes_extras}\n" if instrucoes_extras else ""
+    pag_i = etapa.get("pagina_inicio")
+    pag_f = etapa.get("pagina_fim")
+    tema = etapa.get("tema") or etapa.get("titulo", "")
+    kws = etapa.get("palavras_chave") or []
+
+    system = (
+        "Você monta sessões de estudo médico com atividades concretas e acionáveis. "
+        "Responda APENAS com JSON válido, sem markdown."
+    )
+    user = f"""Monte a sala de estudo do dia para esta etapa:
+
+Etapa: {json.dumps(etapa, ensure_ascii=False)}
+documento_id (para APIs): {documento_id}
+Tempo total alvo: ~{minutos_dia} minutos
+Desempenho prévio do aluno neste material: {desempenho_txt}
+{extras}
+Tipos de atividade permitidos (campo "tipo"):
+- ler: leitura de páginas do material
+- questoes: praticar com questões geradas (use payload com tema, palavras_chave, num_questoes)
+- revisar_erradas: revisar questões que errou no banco
+- resumo: bullets do conteúdo do dia (campo bullets no payload)
+- reflexao: 2–3 perguntas para autoavaliação (campo perguntas no payload)
+
+Regras:
+- Entre 3 e 6 atividades, somando duracao_minutos próximo de {minutos_dia}.
+- Sempre inclua pelo menos: 1x ler, 1x questoes.
+- Se desempenho.temas_fracos existir, inclua revisar_erradas.
+- payload deve incluir documento_id, pagina_inicio, pagina_fim, tema, palavras_chave quando aplicável.
+- Para questoes: num_questoes entre 5 e 15, estilo sugerido "clinico".
+
+Formato JSON:
+{{
+  "titulo": "Sala — ...",
+  "resumo": "motivação em 1–2 frases",
+  "atividades": [
+    {{
+      "tipo": "ler",
+      "titulo": "...",
+      "descricao": "...",
+      "duracao_minutos": 25,
+      "payload": {{
+        "documento_id": {documento_id},
+        "pagina_inicio": {pag_i or 1},
+        "pagina_fim": {pag_f or 1},
+        "tema": "{tema}",
+        "palavras_chave": {json.dumps(kws, ensure_ascii=False)}
+      }}
+    }}
+  ]
+}}"""
+
+    data = _converse_json(system, user, max_tokens=3500, temperature=0.3)
+    atividades = data.get("atividades", [])
+    if not isinstance(atividades, list) or not atividades:
+        raise ValueError("LLM não retornou atividades válidas para a sala.")
+    return data

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Optional
 
+import app as app_pkg
+
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -24,15 +26,39 @@ from app.ocr_jobs import (
     start_ocr_job,
 )
 from app.schemas import (
+    AtividadeStatusUpdate,
+    EtapaStatusUpdate,
     GerarResponse,
     GerarTextoRequest,
     OcrJobCreated,
     OcrJobStatus,
     OcrJobsList,
+    SalaGerarRequest,
+    SalaOut,
+    SalasListResponse,
     TemasResponse,
     QuestaoUpdate,
     TentativaIn,
     TentativaResultado,
+    TrilhaEtapaOut,
+    TrilhaGerarRequest,
+    TrilhaOut,
+    TrilhasListResponse,
+)
+from app.trilha_service import (
+    avancar_etapa_trilha,
+    gerar_sala,
+    gerar_trilha,
+    obter_sala_hoje,
+)
+from app.trilha_storage import (
+    delete_trilha,
+    get_sala,
+    get_trilha,
+    list_salas_trilha,
+    list_trilhas,
+    update_atividade_status,
+    update_etapa_status,
 )
 from app.storage import (
     delete_documento,
@@ -46,7 +72,9 @@ from app.storage import (
     registrar_tentativa,
     update_questao,
 )
-from fastapi.responses import PlainTextResponse, Response
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
+
+from app.api_errors import _is_console_encode_error, raise_http_for_exception
 
 app = FastAPI(
     title="Gerador de Questões",
@@ -63,11 +91,79 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(UnicodeEncodeError)
+async def _handle_unicode_encode_error(_request, _exc: UnicodeEncodeError):
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": (
+                "Erro de codificacao no servidor. Feche todos os python run.py antigos "
+                "e inicie apenas: .venv\\Scripts\\python.exe run.py"
+            )
+        },
+    )
+
+
+@app.exception_handler(ValueError)
+async def _handle_value_error(_request, exc: ValueError):
+    if _is_console_encode_error(exc):
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": (
+                    "Erro de codificacao no servidor. Feche todos os python run.py antigos "
+                    "e inicie apenas: .venv\\Scripts\\python.exe run.py"
+                )
+            },
+        )
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
+@app.get("/api/build")
+def api_build():
+    """Confirme que o servidor carregou o build novo (evita processo antigo na porta 8000)."""
+    import app.generator as gen
+
+    sample = ""
+    try:
+        import inspect
+
+        src = inspect.getsource(gen.generate_from_text)
+        sample = "enviando ao Bedrock" if "enviando ao Bedrock" in src else "legacy"
+    except Exception:
+        sample = "unknown"
+    return {
+        "build": getattr(app_pkg, "_BUILD", "unknown"),
+        "generator_log_marker": sample,
+    }
+
+
+@app.middleware("http")
+async def _guard_encoding_middleware(request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        if _is_console_encode_error(exc):
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "detail": (
+                        "Erro de codificacao (console Windows). "
+                        "Pare o servidor (Ctrl+C), feche outros python run.py e suba de novo: "
+                        "python run.py"
+                    )
+                },
+            )
+        raise
+
+
 @app.on_event("startup")
 def _cleanup_orphans_on_startup() -> None:
     cleaned = cleanup_orphan_jobs()
     if cleaned:
-        print(f"[startup] {cleaned} job(s) OCR órfão(s) marcados como 'interrupted'.", flush=True)
+        from app.console_io import safe_print
+
+        safe_print(f"[startup] {cleaned} job(s) OCR orfao(s) marcados como interrupted.")
 
 MAX_BYTES = settings.max_pdf_upload_mb * 1024 * 1024
 
@@ -404,6 +500,7 @@ def gerar_de_ocr_job(
 def gerar_de_documento(
     documento_id: int,
     num_questoes_por_chunk: int = 2,
+    num_questoes: Optional[int] = None,
     tipos: str = "multipla_escolha",
     dificuldade: Optional[str] = None,
     max_chunks: Optional[int] = None,
@@ -418,12 +515,13 @@ def gerar_de_documento(
     incluir_explicacao: bool = True,
 ):
     """Reusa um documento já salvo no histórico (atalho — não precisa reenviar o PDF)."""
+    n_por_chunk = num_questoes if num_questoes is not None else num_questoes_por_chunk
     tipo_list = _parse_tipos(tipos)
     keywords = _parse_keywords(palavras_chave)
     try:
         questoes, meta = generate_from_documento_id(
             documento_id,
-            num_questoes_por_chunk=num_questoes_por_chunk,
+            num_questoes_por_chunk=n_por_chunk,
             tipos=tipo_list,
             dificuldade=dificuldade,
             max_chunks=max_chunks,
@@ -437,12 +535,8 @@ def gerar_de_documento(
             num_alternativas=num_alternativas,
             incluir_explicacao=incluir_explicacao,
         )
-    except KeyError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except RuntimeError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        raise_http_for_exception(e)
     return GerarResponse(questoes=questoes, meta=meta)
 
 
@@ -565,6 +659,143 @@ def banco_responder(questao_id: int, body: TentativaIn):
 def banco_estatisticas():
     """Resumo do banco: totais, distribuição e top 10 questões mais erradas."""
     return get_banco_estatisticas()
+
+
+# --- Trilha de estudos ---
+
+
+@app.post("/trilhas/gerar", response_model=TrilhaOut)
+def trilha_gerar(body: TrilhaGerarRequest):
+    """
+    Gera trilha completa com IA (temas + plano diário) a partir de um documento OCR.
+
+    Aceita documento com OCR, cache de PDF nativo, job OCR (`ocr_job_id`) ou `texto` colado no body.
+    """
+    try:
+        trilha = gerar_trilha(
+            documento_id=body.documento_id,
+            objetivo=body.objetivo,
+            semanas=body.semanas,
+            horas_por_dia=body.horas_por_dia,
+            dias_por_semana=body.dias_por_semana,
+            max_temas=body.max_temas,
+            instrucoes_extras=body.instrucoes_extras,
+            ocr_job_id=body.ocr_job_id,
+            texto=body.texto,
+        )
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return TrilhaOut(**trilha)
+
+
+@app.get("/trilhas", response_model=TrilhasListResponse)
+def trilhas_listar(documento_id: Optional[int] = None, limit: int = 50):
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit entre 1 e 200")
+    items = list_trilhas(documento_id=documento_id, limit=limit)
+    return TrilhasListResponse(trilhas=items, total=len(items))
+
+
+@app.get("/trilhas/{trilha_id}", response_model=TrilhaOut)
+def trilha_detalhe(trilha_id: int):
+    trilha = get_trilha(trilha_id)
+    if not trilha:
+        raise HTTPException(status_code=404, detail="Trilha não encontrada")
+    return TrilhaOut(**trilha)
+
+
+@app.delete("/trilhas/{trilha_id}")
+def trilha_excluir(trilha_id: int):
+    if not delete_trilha(trilha_id):
+        raise HTTPException(status_code=404, detail="Trilha não encontrada")
+    return {"deleted": True, "trilha_id": trilha_id}
+
+
+@app.post("/trilhas/{trilha_id}/sala", response_model=SalaOut)
+def trilha_gerar_sala(trilha_id: int, body: Optional[SalaGerarRequest] = None):
+    """Gera (ou reutiliza) sala de estudo para a etapa atual ou etapa_id informada."""
+    req = body or SalaGerarRequest()
+    try:
+        sala = gerar_sala(
+            trilha_id,
+            etapa_id=req.etapa_id,
+            regenerar=req.regenerar,
+            instrucoes_extras=req.instrucoes_extras,
+        )
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return SalaOut(**sala)
+
+
+@app.get("/trilhas/{trilha_id}/sala/hoje", response_model=SalaOut)
+def trilha_sala_hoje(trilha_id: int, regenerar: bool = False):
+    """Retorna a sala criada hoje ou gera uma nova se ainda não existir."""
+    try:
+        if regenerar:
+            sala = gerar_sala(trilha_id, regenerar=True)
+        else:
+            sala = obter_sala_hoje(trilha_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return SalaOut(**sala)
+
+
+@app.get("/trilhas/{trilha_id}/salas", response_model=SalasListResponse)
+def trilha_listar_salas(trilha_id: int, limit: int = 30):
+    if not get_trilha(trilha_id, include_etapas=False):
+        raise HTTPException(status_code=404, detail="Trilha não encontrada")
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=400, detail="limit entre 1 e 100")
+    return SalasListResponse(salas=list_salas_trilha(trilha_id, limit=limit))
+
+
+@app.post("/trilhas/{trilha_id}/avancar", response_model=TrilhaOut)
+def trilha_avancar(trilha_id: int):
+    """Marca etapa atual como concluída e avança para a próxima."""
+    try:
+        trilha = avancar_etapa_trilha(trilha_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    return TrilhaOut(**trilha)
+
+
+@app.get("/salas/{sala_id}", response_model=SalaOut)
+def sala_detalhe(sala_id: int):
+    sala = get_sala(sala_id)
+    if not sala:
+        raise HTTPException(status_code=404, detail="Sala não encontrada")
+    return SalaOut(**sala)
+
+
+@app.patch("/trilhas/etapas/{etapa_id}", response_model=TrilhaEtapaOut)
+def trilha_etapa_atualizar(etapa_id: int, body: EtapaStatusUpdate):
+    etapa = update_etapa_status(etapa_id, body.status)
+    if not etapa:
+        raise HTTPException(status_code=404, detail="Etapa não encontrada")
+    return TrilhaEtapaOut(**etapa)
+
+
+@app.patch("/salas/atividades/{atividade_id}")
+def sala_atividade_atualizar(atividade_id: int, body: AtividadeStatusUpdate):
+    try:
+        ativ = update_atividade_status(atividade_id, body.status)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not ativ:
+        raise HTTPException(status_code=404, detail="Atividade não encontrada")
+    return ativ
 
 
 @app.get("/temas/ocr-job/{job_id}", response_model=TemasResponse)

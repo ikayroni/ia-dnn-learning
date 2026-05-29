@@ -168,3 +168,150 @@ class TemasResponse(BaseModel):
     caracteres_amostrados: Optional[int] = None
     modelo: Optional[str] = None
     ocr_job_id: Optional[str] = None
+
+
+TipoAtividadeTrilha = Literal[
+    "ler", "questoes", "revisar_erradas", "resumo", "reflexao"
+]
+StatusEtapaTrilha = Literal["pendente", "em_andamento", "concluida"]
+StatusAtividadeSala = Literal["pendente", "concluida", "ignorada"]
+
+
+class TrilhaGerarRequest(BaseModel):
+    documento_id: int = Field(..., ge=1, description="Documento no histórico (vincula a trilha)")
+    ocr_job_id: Optional[str] = Field(
+        default=None,
+        description="Job OCR concluído (status succeeded). Usa se o documento não tiver ocr_job_id salvo.",
+    )
+    texto: Optional[str] = Field(
+        default=None,
+        min_length=50,
+        description="Texto do material (mín. 50 chars). Usa quando não há OCR/cache — ex.: colar trecho do PDF.",
+    )
+    objetivo: str = Field(
+        default="Revalida / Residência Médica",
+        max_length=200,
+        description="Meta do estudo (prova, especialidade, etc.)",
+    )
+    semanas: int = Field(default=2, ge=1, le=52)
+    horas_por_dia: float = Field(default=1.0, ge=0.25, le=12)
+    dias_por_semana: int = Field(
+        default=5, ge=1, le=7, description="Dias de estudo por semana (ex.: 5 = seg–sex)"
+    )
+    max_temas: int = Field(default=12, ge=3, le=20)
+    instrucoes_extras: Optional[str] = Field(default=None, max_length=500)
+
+
+class TrilhaEtapaOut(BaseModel):
+    id: int
+    trilha_id: int
+    ordem: int
+    modulo: Optional[str] = None
+    titulo: str
+    objetivo: Optional[str] = None
+    pagina_inicio: Optional[int] = None
+    pagina_fim: Optional[int] = None
+    tema: Optional[str] = None
+    palavras_chave: List[str] = Field(default_factory=list)
+    duracao_minutos: Optional[int] = None
+    status: str
+    concluida_em: Optional[str] = None
+
+
+class TrilhaOut(BaseModel):
+    id: int
+    documento_id: int
+    titulo: str
+    objetivo: Optional[str] = None
+    horas_por_dia: Optional[float] = None
+    semanas: Optional[int] = None
+    etapa_atual: int
+    plano: Dict[str, Any] = Field(default_factory=dict)
+    meta: Optional[Dict[str, Any]] = None
+    status: str
+    criado_em: Optional[str] = None
+    atualizado_em: Optional[str] = None
+    etapas: Optional[List[TrilhaEtapaOut]] = None
+
+
+class TrilhaResumoOut(BaseModel):
+    id: int
+    documento_id: int
+    titulo: str
+    objetivo: Optional[str] = None
+    horas_por_dia: Optional[float] = None
+    semanas: Optional[int] = None
+    etapa_atual: int
+    status: str
+    criado_em: Optional[str] = None
+    atualizado_em: Optional[str] = None
+    total_etapas: int
+    etapas_concluidas: int
+
+
+class TrilhasListResponse(BaseModel):
+    trilhas: List[TrilhaResumoOut]
+    total: int
+
+
+class SalaGerarRequest(BaseModel):
+    etapa_id: Optional[int] = Field(
+        default=None, description="Etapa específica; omita para usar etapa_atual da trilha"
+    )
+    regenerar: bool = Field(
+        default=False,
+        description="Se true, cria nova sala mesmo com sala aberta na etapa",
+    )
+    instrucoes_extras: Optional[str] = Field(default=None, max_length=500)
+
+
+class SalaAtividadeOut(BaseModel):
+    id: int
+    sala_id: int
+    ordem: int
+    tipo: str
+    titulo: str
+    descricao: Optional[str] = None
+    duracao_minutos: Optional[int] = None
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    status: str
+    concluida_em: Optional[str] = None
+
+
+class SalaOut(BaseModel):
+    id: int
+    trilha_id: int
+    etapa_id: Optional[int] = None
+    dia_numero: Optional[int] = None
+    titulo: Optional[str] = None
+    resumo: Optional[str] = None
+    meta: Optional[Dict[str, Any]] = None
+    status: str
+    criado_em: Optional[str] = None
+    concluida_em: Optional[str] = None
+    atividades: List[SalaAtividadeOut] = Field(default_factory=list)
+
+
+class SalaResumoOut(BaseModel):
+    id: int
+    trilha_id: int
+    etapa_id: Optional[int] = None
+    dia_numero: Optional[int] = None
+    titulo: Optional[str] = None
+    resumo: Optional[str] = None
+    status: str
+    criado_em: Optional[str] = None
+    total_atividades: int
+    atividades_concluidas: int
+
+
+class SalasListResponse(BaseModel):
+    salas: List[SalaResumoOut]
+
+
+class EtapaStatusUpdate(BaseModel):
+    status: StatusEtapaTrilha
+
+
+class AtividadeStatusUpdate(BaseModel):
+    status: StatusAtividadeSala

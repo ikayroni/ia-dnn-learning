@@ -14,7 +14,9 @@ from app.pdf_utils import prepare_pdf_for_textract, safe_pdf_filename
 
 
 def _olog(msg: str) -> None:
-    print(f"[ocr] {msg}", flush=True, file=sys.stdout)
+    from app.console_io import safe_print
+
+    safe_print(f"[ocr] {msg}")
 
 
 def _s3_client():
@@ -167,7 +169,7 @@ def _run_once(
     _olog(f"upload S3 ({len(pdf_bytes) / 1024:.0f} KB)…")
     t0 = time.time()
     s3_key = upload_pdf_for_ocr(pdf_bytes, filename)
-    _olog(f"upload S3 OK em {time.time() - t0:.1f}s → {s3_key}")
+    _olog(f"upload S3 OK em {time.time() - t0:.1f}s -> {s3_key}")
 
     if on_status:
         on_status("starting_textract")

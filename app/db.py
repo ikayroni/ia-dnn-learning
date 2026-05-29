@@ -81,6 +81,68 @@ CREATE INDEX IF NOT EXISTS idx_ger_doc ON geracoes(documento_id);
 CREATE INDEX IF NOT EXISTS idx_q_ger ON questoes(geracao_id);
 CREATE INDEX IF NOT EXISTS idx_tent_q ON tentativas(questao_id);
 CREATE INDEX IF NOT EXISTS idx_tent_data ON tentativas(criado_em DESC);
+
+CREATE TABLE IF NOT EXISTS trilhas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    documento_id INTEGER NOT NULL REFERENCES documentos(id) ON DELETE CASCADE,
+    titulo TEXT NOT NULL,
+    objetivo TEXT,
+    horas_por_dia REAL,
+    semanas INTEGER,
+    etapa_atual INTEGER NOT NULL DEFAULT 1,
+    plano_json TEXT NOT NULL,
+    meta_json TEXT,
+    status TEXT NOT NULL DEFAULT 'ativa',
+    criado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    atualizado_em TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS trilha_etapas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trilha_id INTEGER NOT NULL REFERENCES trilhas(id) ON DELETE CASCADE,
+    ordem INTEGER NOT NULL,
+    modulo TEXT,
+    titulo TEXT NOT NULL,
+    objetivo TEXT,
+    pagina_inicio INTEGER,
+    pagina_fim INTEGER,
+    tema TEXT,
+    palavras_chave TEXT,
+    duracao_minutos INTEGER,
+    status TEXT NOT NULL DEFAULT 'pendente',
+    concluida_em TEXT
+);
+
+CREATE TABLE IF NOT EXISTS salas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trilha_id INTEGER NOT NULL REFERENCES trilhas(id) ON DELETE CASCADE,
+    etapa_id INTEGER REFERENCES trilha_etapas(id) ON DELETE SET NULL,
+    dia_numero INTEGER,
+    titulo TEXT,
+    resumo TEXT,
+    meta_json TEXT,
+    status TEXT NOT NULL DEFAULT 'aberta',
+    criado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    concluida_em TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sala_atividades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sala_id INTEGER NOT NULL REFERENCES salas(id) ON DELETE CASCADE,
+    ordem INTEGER NOT NULL,
+    tipo TEXT NOT NULL,
+    titulo TEXT NOT NULL,
+    descricao TEXT,
+    duracao_minutos INTEGER,
+    payload_json TEXT,
+    status TEXT NOT NULL DEFAULT 'pendente',
+    concluida_em TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_trilha_doc ON trilhas(documento_id);
+CREATE INDEX IF NOT EXISTS idx_etapa_trilha ON trilha_etapas(trilha_id, ordem);
+CREATE INDEX IF NOT EXISTS idx_sala_trilha ON salas(trilha_id);
+CREATE INDEX IF NOT EXISTS idx_ativ_sala ON sala_atividades(sala_id, ordem);
 """
 
 
