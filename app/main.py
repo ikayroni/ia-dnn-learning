@@ -30,6 +30,7 @@ from app.schemas import (
     OcrJobStatus,
     OcrJobsList,
     TemasResponse,
+    QuestaoUpdate,
     TentativaIn,
     TentativaResultado,
 )
@@ -43,6 +44,7 @@ from app.storage import (
     list_banco_questoes,
     list_documentos,
     registrar_tentativa,
+    update_questao,
 )
 from fastapi.responses import PlainTextResponse, Response
 
@@ -524,6 +526,21 @@ def banco_listar(
 @app.get("/banco/questoes/{questao_id}")
 def banco_detalhe(questao_id: int):
     q = get_questao_with_tentativas(questao_id)
+    if not q:
+        raise HTTPException(status_code=404, detail="Questão não encontrada")
+    return q
+
+
+@app.patch("/banco/questoes/{questao_id}")
+def banco_atualizar_questao(questao_id: int, body: QuestaoUpdate):
+    """Edita enunciado, alternativas, gabarito, explicações etc. e persiste no banco."""
+    updates = body.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="Envie ao menos um campo para atualizar")
+    try:
+        q = update_questao(questao_id, updates)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     if not q:
         raise HTTPException(status_code=404, detail="Questão não encontrada")
     return q

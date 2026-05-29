@@ -27,6 +27,10 @@ class FonteQuestao(BaseModel):
 
 
 class Questao(BaseModel):
+    id: Optional[int] = Field(
+        default=None,
+        description="ID no banco (presente após salvar a geração ou ao carregar do histórico).",
+    )
     tipo: TipoQuestao
     enunciado: str
     alternativas: Optional[List[str]] = None
@@ -121,6 +125,22 @@ class OcrJobStatus(BaseModel):
 class OcrJobsList(BaseModel):
     jobs: List["OcrJobStatus"]
     total: int
+
+
+class QuestaoUpdate(BaseModel):
+    """Campos opcionais para PATCH /banco/questoes/{id} — envie só o que mudou."""
+
+    tipo: Optional[TipoQuestao] = None
+    enunciado: Optional[str] = Field(default=None, min_length=1)
+    alternativas: Optional[List[str]] = None
+    gabarito: Optional[str] = Field(default=None, min_length=1)
+    dificuldade: Optional[Dificuldade] = None
+    explicacao: Optional[str] = None
+    explicacoes_alternativas: Optional[Dict[str, str]] = None
+    referencia: Optional[str] = None
+    idioma: Optional[Idioma] = None
+    estilo: Optional[EstiloQuestao] = None
+    fonte: Optional[FonteQuestao] = None
 
 
 class TentativaIn(BaseModel):

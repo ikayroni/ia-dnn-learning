@@ -23,6 +23,12 @@ def _log(msg: str) -> None:
     print(f"[gerador] {msg}", flush=True, file=sys.stdout)
 
 
+def _attach_questao_ids(questoes: list[Questao], ids: list[int]) -> list[Questao]:
+    if len(ids) != len(questoes):
+        return questoes
+    return [q.model_copy(update={"id": qid}) for q, qid in zip(questoes, ids)]
+
+
 def _dedupe_questions(questoes: list[Questao]) -> list[Questao]:
     seen: set[str] = set()
     unique: list[Questao] = []
@@ -247,7 +253,7 @@ def generate_from_pdf_bytes(
         "idioma", "estilo", "num_alternativas", "incluir_explicacao",
     )}
     try:
-        geracao_id = save_geracao(
+        geracao_id, questao_ids = save_geracao(
             documento_id=documento_id,
             questoes=questoes,
             meta=meta,
@@ -255,6 +261,7 @@ def generate_from_pdf_bytes(
         )
         meta["geracao_id"] = geracao_id
         meta["documento_id"] = documento_id
+        questoes = _attach_questao_ids(questoes, questao_ids)
         _log(f"geracao salva · documento_id={documento_id} geracao_id={geracao_id}")
     except Exception as e:
         meta["storage_error"] = str(e)
@@ -280,7 +287,7 @@ def generate_from_ocr_job(
         "idioma", "estilo", "num_alternativas", "incluir_explicacao",
     )}
     try:
-        geracao_id = save_geracao(
+        geracao_id, questao_ids = save_geracao(
             documento_id=documento_id,
             questoes=questoes,
             meta=meta,
@@ -288,6 +295,7 @@ def generate_from_ocr_job(
         )
         meta["geracao_id"] = geracao_id
         meta["documento_id"] = documento_id
+        questoes = _attach_questao_ids(questoes, questao_ids)
     except Exception as e:
         meta["storage_error"] = str(e)
     return questoes, meta
@@ -333,13 +341,14 @@ def generate_from_documento_id(documento_id: int, **kwargs) -> tuple[list[Questa
         "idioma", "estilo", "num_alternativas", "incluir_explicacao",
     )}
     try:
-        geracao_id = save_geracao(
+        geracao_id, questao_ids = save_geracao(
             documento_id=documento_id,
             questoes=questoes,
             meta=meta,
             parametros=parametros,
         )
         meta["geracao_id"] = geracao_id
+        questoes = _attach_questao_ids(questoes, questao_ids)
     except Exception as e:
         meta["storage_error"] = str(e)
     return questoes, meta

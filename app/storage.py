@@ -98,7 +98,7 @@ def save_geracao(
     questoes: list[Questao],
     meta: dict,
     parametros: dict,
-) -> int:
+) -> tuple[int, list[int]]:
     init_db()
     with connect() as conn:
         cur = conn.execute(
@@ -133,10 +133,11 @@ def save_geracao(
             ),
         )
         geracao_id = int(cur.lastrowid)
+        questao_ids: list[int] = []
 
         for i, q in enumerate(questoes):
             fonte = q.fonte
-            conn.execute(
+            qcur = conn.execute(
                 """INSERT INTO questoes
                    (geracao_id, ordem, tipo, enunciado, alternativas_json,
                     gabarito, dificuldade, chunk_id, pagina_inicio, pagina_fim,
@@ -163,8 +164,9 @@ def save_geracao(
                     q.estilo,
                 ),
             )
+            questao_ids.append(int(qcur.lastrowid))
         conn.commit()
-        return geracao_id
+        return geracao_id, questao_ids
 
 
 def list_documentos(limit: int = 50) -> list[dict[str, Any]]:
@@ -246,6 +248,7 @@ def get_geracao_with_questoes(geracao_id: int) -> Optional[dict[str, Any]]:
 
     ger["questoes"] = [
         {
+            "id": int(q["id"]),
             "ordem": q["ordem"],
             "tipo": q["tipo"],
             "enunciado": q["enunciado"],
@@ -433,6 +436,148 @@ def list_banco_questoes(
     }
 
 
+def _row_to_questao_dict(row: Any) -> dict[str, Any]:
+    try:
+        alts = json.loads(row["alternativas_json"]) if row["alternativas_json"] else None
+    except Exception:
+        alts = None
+    try:
+        expl_alts = (
+            json.loads(row["explicacoes_alternativas_json"])
+            if row["explicacoes_alternativas_json"]
+            else None
+        )
+    except Exception:
+        expl_alts = None
+    return {
+        "id": int(row["id"]),
+        "geracao_id": row["geracao_id"],
+        "tipo": row["tipo"],
+        "enunciado": row["enunciado"],
+        "alternativas": alts,
+        "gabarito": row["gabarito"],
+        "dificuldade": row["dificuldade"],
+        "fonte": {
+            "chunk_id": row["chunk_id"],
+            "pagina_inicio": row["pagina_inicio"],
+            "pagina_fim": row["pagina_fim"],
+        },
+        "explicacao": row["explicacao"],
+        "explicacoes_alternativas": expl_alts,
+        "referencia": row["referencia"],
+        "idioma": row["idioma"],
+        "estilo": row["estilo"],
+    }
+
+
+def _validar_gabarito_alternativas(
+    gabarito: str,
+    alternativas: Optional[list[str]],
+    tipo: str,
+) -> None:
+    if tipo != "multipla_escolha" or not alternativas:
+        return
+    g = gabarito.strip().upper()
+    if len(g) != 1 or not g.isalpha():
+        raise ValueError("gabarito deve ser uma letra (A, B, C, …) em múltipla escolha")
+    idx = ord(g) - ord("A")
+    if idx < 0 or idx >= len(alternativas):
+        raise ValueError(
+            f"gabarito '{gabarito}' fora do intervalo das alternativas (A–{chr(64 + len(alternativas))})"
+        )
+
+
+def update_questao(questao_id: int, updates: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """Atualiza campos da questão. Retorna o registro atualizado ou None se não existir."""
+    if not updates:
+        raise ValueError("nenhum campo para atualizar")
+    init_db()
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM questoes WHERE id = ?", (questao_id,)).fetchone()
+        if not row:
+            return None
+
+        tipo = updates.get("tipo", row["tipo"])
+        enunciado = updates.get("enunciado", row["enunciado"])
+        if not str(enunciado).strip():
+            raise ValueError("enunciado não pode ser vazio")
+
+        if "alternativas" in updates:
+            alts = updates["alternativas"]
+            alts_json = (
+                json.dumps(alts, ensure_ascii=False) if alts is not None else None
+            )
+        else:
+            try:
+                alts = (
+                    json.loads(row["alternativas_json"])
+                    if row["alternativas_json"]
+                    else None
+                )
+            except Exception:
+                alts = None
+            alts_json = row["alternativas_json"]
+
+        gabarito = updates.get("gabarito", row["gabarito"])
+        _validar_gabarito_alternativas(str(gabarito), alts, tipo)
+
+        sets: list[str] = []
+        params: list[Any] = []
+
+        field_map = {
+            "tipo": "tipo",
+            "enunciado": "enunciado",
+            "gabarito": "gabarito",
+            "dificuldade": "dificuldade",
+            "explicacao": "explicacao",
+            "referencia": "referencia",
+            "idioma": "idioma",
+            "estilo": "estilo",
+        }
+        for key, col in field_map.items():
+            if key in updates:
+                sets.append(f"{col}=?")
+                params.append(updates[key])
+
+        if "alternativas" in updates:
+            sets.append("alternativas_json=?")
+            params.append(alts_json)
+
+        if "explicacoes_alternativas" in updates:
+            expl = updates["explicacoes_alternativas"]
+            sets.append("explicacoes_alternativas_json=?")
+            params.append(
+                json.dumps(expl, ensure_ascii=False) if expl is not None else None
+            )
+
+        fonte = updates.get("fonte")
+        if fonte is not None:
+            if isinstance(fonte, dict):
+                chunk_id = fonte.get("chunk_id")
+                pagina_inicio = fonte.get("pagina_inicio")
+                pagina_fim = fonte.get("pagina_fim")
+            else:
+                chunk_id = getattr(fonte, "chunk_id", None)
+                pagina_inicio = getattr(fonte, "pagina_inicio", None)
+                pagina_fim = getattr(fonte, "pagina_fim", None)
+            sets.extend(["chunk_id=?", "pagina_inicio=?", "pagina_fim=?"])
+            params.extend([chunk_id, pagina_inicio, pagina_fim])
+
+        if not sets:
+            raise ValueError("nenhum campo para atualizar")
+
+        params.append(questao_id)
+        conn.execute(
+            f"UPDATE questoes SET {', '.join(sets)} WHERE id=?",
+            tuple(params),
+        )
+        conn.commit()
+        updated = conn.execute(
+            "SELECT * FROM questoes WHERE id = ?", (questao_id,)
+        ).fetchone()
+    return _row_to_questao_dict(updated) if updated else None
+
+
 def get_questao_with_tentativas(questao_id: int) -> Optional[dict[str, Any]]:
     init_db()
     with connect() as conn:
@@ -451,41 +596,18 @@ def get_questao_with_tentativas(questao_id: int) -> Optional[dict[str, Any]]:
             "SELECT * FROM tentativas WHERE questao_id = ? ORDER BY criado_em DESC",
             (questao_id,),
         ).fetchall()
-    try:
-        alts = json.loads(row["alternativas_json"]) if row["alternativas_json"] else None
-    except Exception:
-        alts = None
-    try:
-        expl_alts = (
-            json.loads(row["explicacoes_alternativas_json"])
-            if row["explicacoes_alternativas_json"]
-            else None
-        )
-    except Exception:
-        expl_alts = None
+    base = _row_to_questao_dict(row)
+    base.update(
+        {
+            "documento_id": row["documento_id"],
+            "nome_arquivo": row["nome_arquivo"],
+            "tema": row["tema"],
+            "modelo": row["modelo"],
+            "geracao_criada_em": row["geracao_criada_em"],
+        }
+    )
     return {
-        "id": int(row["id"]),
-        "geracao_id": row["geracao_id"],
-        "documento_id": row["documento_id"],
-        "nome_arquivo": row["nome_arquivo"],
-        "tipo": row["tipo"],
-        "enunciado": row["enunciado"],
-        "alternativas": alts,
-        "gabarito": row["gabarito"],
-        "dificuldade": row["dificuldade"],
-        "fonte": {
-            "chunk_id": row["chunk_id"],
-            "pagina_inicio": row["pagina_inicio"],
-            "pagina_fim": row["pagina_fim"],
-        },
-        "explicacao": row["explicacao"],
-        "explicacoes_alternativas": expl_alts,
-        "referencia": row["referencia"],
-        "idioma": row["idioma"],
-        "estilo": row["estilo"],
-        "tema": row["tema"],
-        "modelo": row["modelo"],
-        "geracao_criada_em": row["geracao_criada_em"],
+        **base,
         "tentativas": [
             {
                 "id": int(t["id"]),
