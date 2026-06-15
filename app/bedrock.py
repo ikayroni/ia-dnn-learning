@@ -417,6 +417,80 @@ def _converse_json(system: str, user: str, *, max_tokens: int = 4000, temperatur
     return _parse_json_response(raw)
 
 
+def gerar_flashcards(
+    chunk_text: str,
+    *,
+    num_flashcards: int = 5,
+    chunk_id: int = 0,
+    page_start: int | None = None,
+    page_end: int | None = None,
+    tema: str | None = None,
+    instrucoes_extras: str | None = None,
+    idioma: str = "pt",
+) -> dict:
+    """Gera flashcards (frente/verso) a partir de um trecho do material via Bedrock.
+
+    Retorna {"flashcards": [{frente, verso, dica, tags, dificuldade, referencia, fonte}]}.
+    """
+    idioma_nome = IDIOMA_NOMES.get(idioma, IDIOMA_NOMES["pt"])
+
+    system = f"""Você cria FLASHCARDS de estudo de alto nível (estilo NotebookLM / Anki) para medicina (Revalida, Residência, USMLE).
+Gere os cards EXCLUSIVAMENTE com base no TEXTO fornecido — não invente fatos, dosagens ou condutas fora do texto.
+Idioma OBRIGATÓRIO de frente, verso e dica: {idioma_nome}.
+Responda APENAS com JSON válido (sem markdown, sem comentários, sem texto fora do JSON).
+
+Princípios de um bom flashcard:
+- FRENTE: uma única pergunta/conceito objetivo (evite "liste tudo sobre..."). Prefira recall ativo.
+- VERSO: resposta curta, precisa e suficiente (1–4 frases ou bullets curtos).
+- Evite cards duplicados ou triviais; cubra os pontos mais cobráveis do trecho.
+- "dica": opcional, uma pista curta que ajude a lembrar sem entregar a resposta.
+- "referencia": citação curta (até 240 caracteres) do trecho que fundamenta o verso."""
+
+    diff_line = ""
+    tema_line = ""
+    if tema and tema.strip():
+        tema_line = (
+            f'FOCO/TEMA: gere flashcards somente sobre "{tema.strip()}".\n'
+            'Se o trecho NÃO contiver informação sobre o tema, retorne {"flashcards": []}.\n'
+        )
+    extras_line = ""
+    if instrucoes_extras and instrucoes_extras.strip():
+        extras_line = f"Instruções adicionais: {instrucoes_extras.strip()}\n"
+    page_info = ""
+    if page_start is not None:
+        page_info = f"Páginas aproximadas do trecho: {page_start}"
+        if page_end and page_end != page_start:
+            page_info += f"–{page_end}"
+        page_info += ".\n"
+
+    user = f"""{diff_line}{page_info}{tema_line}{extras_line}chunk_id para fonte: {chunk_id}.
+Gere até {num_flashcards} flashcard(s) de alta qualidade a partir do TEXTO.
+
+Formato JSON obrigatório (sem markdown):
+{{
+  "flashcards": [
+    {{
+      "frente": "...",
+      "verso": "...",
+      "dica": "... (ou null)",
+      "tags": ["...", "..."],
+      "dificuldade": "facil|media|dificil",
+      "referencia": "...",
+      "fonte": {{ "chunk_id": {chunk_id}, "pagina_inicio": {page_start or "null"}, "pagina_fim": {page_end or "null"} }}
+    }}
+  ]
+}}
+
+TEXTO:
+{chunk_text}"""
+
+    data = _converse_json(system, user, max_tokens=4000, temperature=0.3)
+    cards = data.get("flashcards", [])
+    if not isinstance(cards, list):
+        return {"flashcards": []}
+    return {"flashcards": cards}
+
+
 def generate_trilha_plano(
     *,
     sample_text: str,

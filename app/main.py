@@ -27,7 +27,10 @@ from app.ocr_jobs import (
 )
 from app.schemas import (
     AtividadeStatusUpdate,
+    EtapaManualIn,
+    EtapasReorder,
     EtapaStatusUpdate,
+    EtapaUpdate,
     GerarResponse,
     GerarTextoRequest,
     OcrJobCreated,
@@ -42,8 +45,10 @@ from app.schemas import (
     TentativaResultado,
     TrilhaEtapaOut,
     TrilhaGerarRequest,
+    TrilhaManualCreate,
     TrilhaOut,
     TrilhasListResponse,
+    TrilhaUpdate,
 )
 from app.trilha_service import (
     avancar_etapa_trilha,
@@ -52,13 +57,19 @@ from app.trilha_service import (
     obter_sala_hoje,
 )
 from app.trilha_storage import (
+    create_etapa,
+    create_trilha,
+    delete_etapa,
     delete_trilha,
     get_sala,
     get_trilha,
     list_salas_trilha,
     list_trilhas,
+    reorder_etapas,
     update_atividade_status,
+    update_etapa,
     update_etapa_status,
+    update_trilha,
 )
 from app.storage import (
     delete_documento,
@@ -73,6 +84,42 @@ from app.storage import (
     update_questao,
 )
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
+
+from app.flashcards_service import (
+    generate_flashcards_from_documento_id,
+    generate_flashcards_from_ocr_job,
+    generate_flashcards_from_pdf_bytes,
+    generate_flashcards_from_text,
+)
+from app.flashcards_storage import (
+    add_cards,
+    delete_card,
+    delete_deck,
+    get_card_revisoes,
+    get_deck,
+    get_deck_progresso,
+    get_due_cards,
+    get_estatisticas as get_flashcards_estatisticas,
+    list_decks,
+    registrar_revisao,
+    save_deck,
+    update_card,
+)
+from app.schemas import (
+    DeckCriarRequest,
+    DeckOut,
+    DeckProgressoOut,
+    DecksListResponse,
+    EstudoResponse,
+    FlashcardManualIn,
+    FlashcardsEstatisticas,
+    FlashcardsGerarResponse,
+    FlashcardsGerarTextoRequest,
+    FlashcardUpdate,
+    RevisaoIn,
+    RevisaoResultado,
+    RevisoesHistoricoResponse,
+)
 
 from app.api_errors import _is_console_encode_error, raise_http_for_exception
 
@@ -692,6 +739,31 @@ def trilha_gerar(body: TrilhaGerarRequest):
     return TrilhaOut(**trilha)
 
 
+@app.post("/trilhas", response_model=TrilhaOut)
+def trilha_criar_manual(body: TrilhaManualCreate):
+    """Cria uma trilha manualmente (modo professor), sem IA. Material opcional."""
+    plano = {"titulo": body.titulo, "resumo": body.resumo} if body.resumo else {"titulo": body.titulo}
+    etapas = [e.model_dump() for e in body.etapas]
+    try:
+        trilha_id = create_trilha(
+            documento_id=body.documento_id,
+            titulo=body.titulo,
+            objetivo=body.objetivo,
+            horas_por_dia=body.horas_por_dia,
+            semanas=body.semanas,
+            plano=plano,
+            meta={"origem": "manual"},
+            etapas=etapas,
+            origem="manual",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    trilha = get_trilha(trilha_id)
+    if not trilha:
+        raise HTTPException(status_code=500, detail="Falha ao criar trilha")
+    return TrilhaOut(**trilha)
+
+
 @app.get("/trilhas", response_model=TrilhasListResponse)
 def trilhas_listar(documento_id: Optional[int] = None, limit: int = 50):
     if limit < 1 or limit > 200:
@@ -703,6 +775,32 @@ def trilhas_listar(documento_id: Optional[int] = None, limit: int = 50):
 @app.get("/trilhas/{trilha_id}", response_model=TrilhaOut)
 def trilha_detalhe(trilha_id: int):
     trilha = get_trilha(trilha_id)
+    if not trilha:
+        raise HTTPException(status_code=404, detail="Trilha não encontrada")
+    return TrilhaOut(**trilha)
+
+
+@app.patch("/trilhas/{trilha_id}", response_model=TrilhaOut)
+def trilha_editar(trilha_id: int, body: TrilhaUpdate):
+    """Edita os dados gerais da trilha (modo professor)."""
+    updates = body.model_dump(exclude_unset=True)
+    trilha = update_trilha(trilha_id, updates)
+    if not trilha:
+        raise HTTPException(status_code=404, detail="Trilha não encontrada")
+    return TrilhaOut(**trilha)
+
+
+@app.post("/trilhas/{trilha_id}/etapas", response_model=TrilhaEtapaOut)
+def trilha_etapa_criar(trilha_id: int, body: EtapaManualIn):
+    etapa = create_etapa(trilha_id, body.model_dump())
+    if not etapa:
+        raise HTTPException(status_code=404, detail="Trilha não encontrada")
+    return TrilhaEtapaOut(**etapa)
+
+
+@app.post("/trilhas/{trilha_id}/etapas/reordenar", response_model=TrilhaOut)
+def trilha_etapas_reordenar(trilha_id: int, body: EtapasReorder):
+    trilha = reorder_etapas(trilha_id, body.ordem)
     if not trilha:
         raise HTTPException(status_code=404, detail="Trilha não encontrada")
     return TrilhaOut(**trilha)
@@ -780,11 +878,22 @@ def sala_detalhe(sala_id: int):
 
 
 @app.patch("/trilhas/etapas/{etapa_id}", response_model=TrilhaEtapaOut)
-def trilha_etapa_atualizar(etapa_id: int, body: EtapaStatusUpdate):
-    etapa = update_etapa_status(etapa_id, body.status)
+def trilha_etapa_atualizar(etapa_id: int, body: EtapaUpdate):
+    """Edita conteúdo e/ou status da etapa (modo professor)."""
+    updates = body.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nada para atualizar")
+    etapa = update_etapa(etapa_id, updates)
     if not etapa:
         raise HTTPException(status_code=404, detail="Etapa não encontrada")
     return TrilhaEtapaOut(**etapa)
+
+
+@app.delete("/trilhas/etapas/{etapa_id}")
+def trilha_etapa_excluir(etapa_id: int):
+    if not delete_etapa(etapa_id):
+        raise HTTPException(status_code=404, detail="Etapa não encontrada")
+    return {"deleted": True, "etapa_id": etapa_id}
 
 
 @app.patch("/salas/atividades/{atividade_id}")
@@ -812,3 +921,257 @@ def descobrir_temas_ocr(job_id: str, max_topics: int = 10):
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     return TemasResponse(**info)
+
+
+# --- Flash cards (estilo NotebookLM) ---
+
+
+@app.post("/flashcards/gerar/texto", response_model=FlashcardsGerarResponse)
+def flashcards_gerar_texto(body: FlashcardsGerarTextoRequest):
+    """Gera um deck de flashcards a partir de texto colado."""
+    try:
+        result = generate_flashcards_from_text(
+            body.texto,
+            titulo=body.titulo,
+            idioma=body.idioma,
+            num_flashcards_por_chunk=body.num_flashcards_por_chunk,
+            max_chunks=body.max_chunks,
+            tema=body.tema,
+            palavras_chave=body.palavras_chave,
+            pagina_inicio=body.pagina_inicio,
+            pagina_fim=body.pagina_fim,
+            instrucoes_extras=body.instrucoes_extras,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return FlashcardsGerarResponse(deck=DeckOut(**result["deck"]), meta=result["meta"])
+
+
+@app.post("/flashcards/gerar/pdf", response_model=FlashcardsGerarResponse)
+async def flashcards_gerar_pdf(
+    arquivo: UploadFile = File(..., description="Arquivo PDF com texto selecionável"),
+    num_flashcards_por_chunk: int = Form(default=5, ge=1, le=20),
+    max_chunks: Optional[int] = Form(default=None, ge=1, le=50),
+    tema: Optional[str] = Form(default=None),
+    palavras_chave: Optional[str] = Form(default=None, description="Lista separada por vírgula"),
+    pagina_inicio: Optional[int] = Form(default=None, ge=1),
+    pagina_fim: Optional[int] = Form(default=None, ge=1),
+    instrucoes_extras: Optional[str] = Form(default=None),
+    idioma: str = Form(default="pt"),
+    titulo: Optional[str] = Form(default=None),
+):
+    data = await _read_pdf_upload(arquivo)
+    keywords = _parse_keywords(palavras_chave)
+    try:
+        result = generate_flashcards_from_pdf_bytes(
+            data,
+            filename=arquivo.filename or "documento.pdf",
+            titulo=titulo,
+            idioma=idioma,
+            num_flashcards_por_chunk=num_flashcards_por_chunk,
+            max_chunks=max_chunks,
+            tema=tema,
+            palavras_chave=keywords,
+            pagina_inicio=pagina_inicio,
+            pagina_fim=pagina_fim,
+            instrucoes_extras=instrucoes_extras,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return FlashcardsGerarResponse(deck=DeckOut(**result["deck"]), meta=result["meta"])
+
+
+@app.post("/flashcards/gerar/ocr-job/{job_id}", response_model=FlashcardsGerarResponse)
+def flashcards_gerar_ocr_job(
+    job_id: str,
+    num_flashcards_por_chunk: int = 5,
+    max_chunks: Optional[int] = None,
+    tema: Optional[str] = None,
+    palavras_chave: Optional[str] = None,
+    pagina_inicio: Optional[int] = None,
+    pagina_fim: Optional[int] = None,
+    instrucoes_extras: Optional[str] = None,
+    idioma: str = "pt",
+    titulo: Optional[str] = None,
+):
+    """Gera flashcards a partir do texto de um job OCR concluído."""
+    keywords = _parse_keywords(palavras_chave)
+    try:
+        result = generate_flashcards_from_ocr_job(
+            job_id,
+            titulo=titulo,
+            idioma=idioma,
+            num_flashcards_por_chunk=num_flashcards_por_chunk,
+            max_chunks=max_chunks,
+            tema=tema,
+            palavras_chave=keywords,
+            pagina_inicio=pagina_inicio,
+            pagina_fim=pagina_fim,
+            instrucoes_extras=instrucoes_extras,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Job OCR não encontrado") from None
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return FlashcardsGerarResponse(deck=DeckOut(**result["deck"]), meta=result["meta"])
+
+
+@app.post("/flashcards/gerar/documento/{documento_id}", response_model=FlashcardsGerarResponse)
+def flashcards_gerar_documento(
+    documento_id: int,
+    num_flashcards_por_chunk: int = 5,
+    max_chunks: Optional[int] = None,
+    tema: Optional[str] = None,
+    palavras_chave: Optional[str] = None,
+    pagina_inicio: Optional[int] = None,
+    pagina_fim: Optional[int] = None,
+    instrucoes_extras: Optional[str] = None,
+    idioma: str = "pt",
+    titulo: Optional[str] = None,
+):
+    """Reusa um documento já salvo no histórico para gerar flashcards (sem reenviar PDF)."""
+    keywords = _parse_keywords(palavras_chave)
+    try:
+        result = generate_flashcards_from_documento_id(
+            documento_id,
+            titulo=titulo,
+            idioma=idioma,
+            num_flashcards_por_chunk=num_flashcards_por_chunk,
+            max_chunks=max_chunks,
+            tema=tema,
+            palavras_chave=keywords,
+            pagina_inicio=pagina_inicio,
+            pagina_fim=pagina_fim,
+            instrucoes_extras=instrucoes_extras,
+        )
+    except Exception as e:
+        raise_http_for_exception(e)
+    return FlashcardsGerarResponse(deck=DeckOut(**result["deck"]), meta=result["meta"])
+
+
+@app.post("/flashcards/decks", response_model=DeckOut)
+def flashcards_criar_deck(body: DeckCriarRequest):
+    """Cria um deck manualmente (vazio ou com cards informados, sem IA)."""
+    deck_id = save_deck(
+        titulo=body.titulo,
+        cards=[c.model_dump() for c in body.cards],
+        documento_id=body.documento_id,
+        descricao=body.descricao,
+        tema=body.tema,
+        idioma=body.idioma,
+        fonte="manual",
+    )
+    deck = get_deck(deck_id)
+    if not deck:
+        raise HTTPException(status_code=500, detail="Falha ao criar deck")
+    return DeckOut(**deck)
+
+
+@app.get("/flashcards/decks", response_model=DecksListResponse)
+def flashcards_listar_decks(documento_id: Optional[int] = None, limit: int = 50):
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit entre 1 e 200")
+    decks = list_decks(documento_id=documento_id, limit=limit)
+    return DecksListResponse(decks=decks, total=len(decks))
+
+
+@app.get("/flashcards/decks/{deck_id}", response_model=DeckOut)
+def flashcards_obter_deck(deck_id: int):
+    deck = get_deck(deck_id)
+    if not deck:
+        raise HTTPException(status_code=404, detail="Deck não encontrado")
+    return DeckOut(**deck)
+
+
+@app.get("/flashcards/decks/{deck_id}/progresso", response_model=DeckProgressoOut)
+def flashcards_deck_progresso(deck_id: int):
+    """O que o aluno já fez no baralho: estado e histórico resumido de cada card."""
+    prog = get_deck_progresso(deck_id)
+    if not prog:
+        raise HTTPException(status_code=404, detail="Deck não encontrado")
+    return DeckProgressoOut(**prog)
+
+
+@app.get("/flashcards/cards/{card_id}/revisoes", response_model=RevisoesHistoricoResponse)
+def flashcards_card_revisoes(card_id: int, limit: int = 50):
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit entre 1 e 200")
+    return RevisoesHistoricoResponse(
+        flashcard_id=card_id, revisoes=get_card_revisoes(card_id, limit=limit)
+    )
+
+
+@app.delete("/flashcards/decks/{deck_id}")
+def flashcards_excluir_deck(deck_id: int):
+    if not delete_deck(deck_id):
+        raise HTTPException(status_code=404, detail="Deck não encontrado")
+    return {"deleted": True, "deck_id": deck_id}
+
+
+@app.post("/flashcards/decks/{deck_id}/cards", response_model=DeckOut)
+def flashcards_add_cards(deck_id: int, cards: list[FlashcardManualIn]):
+    """Adiciona cards manuais a um deck existente."""
+    try:
+        add_cards(deck_id, [c.model_dump() for c in cards])
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    deck = get_deck(deck_id)
+    return DeckOut(**deck)
+
+
+@app.patch("/flashcards/cards/{card_id}")
+def flashcards_atualizar_card(card_id: int, body: FlashcardUpdate):
+    updates = body.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="Envie ao menos um campo")
+    try:
+        card = update_card(card_id, updates)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not card:
+        raise HTTPException(status_code=404, detail="Flashcard não encontrado")
+    return card
+
+
+@app.delete("/flashcards/cards/{card_id}")
+def flashcards_excluir_card(card_id: int):
+    if not delete_card(card_id):
+        raise HTTPException(status_code=404, detail="Flashcard não encontrado")
+    return {"deleted": True, "flashcard_id": card_id}
+
+
+@app.get("/flashcards/estudo", response_model=EstudoResponse)
+def flashcards_estudo(
+    deck_id: Optional[int] = None, limit: int = 20, incluir_novos: bool = True
+):
+    """Cards a revisar agora (repetição espaçada). Vencidos primeiro, depois novos."""
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=400, detail="limit entre 1 e 100")
+    data = get_due_cards(deck_id=deck_id, limit=limit, incluir_novos=incluir_novos)
+    return EstudoResponse(**data)
+
+
+@app.post("/flashcards/cards/{card_id}/revisao", response_model=RevisaoResultado)
+def flashcards_revisar(card_id: int, body: RevisaoIn):
+    """Registra a auto-avaliação (0=Errei,1=Difícil,2=Bom,3=Fácil) e reagenda via SM-2."""
+    try:
+        resultado = registrar_revisao(
+            flashcard_id=card_id,
+            nota=body.nota,
+            tempo_resposta_ms=body.tempo_resposta_ms,
+        )
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    return RevisaoResultado(**resultado)
+
+
+@app.get("/flashcards/estatisticas", response_model=FlashcardsEstatisticas)
+def flashcards_estatisticas():
+    """Resumo: decks, cards, revisões, cards a revisar hoje, novos e dominados."""
+    return FlashcardsEstatisticas(**get_flashcards_estatisticas())

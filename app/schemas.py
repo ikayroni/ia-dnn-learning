@@ -209,6 +209,7 @@ class TrilhaEtapaOut(BaseModel):
     modulo: Optional[str] = None
     titulo: str
     objetivo: Optional[str] = None
+    conteudo: Optional[str] = None
     pagina_inicio: Optional[int] = None
     pagina_fim: Optional[int] = None
     tema: Optional[str] = None
@@ -220,7 +221,7 @@ class TrilhaEtapaOut(BaseModel):
 
 class TrilhaOut(BaseModel):
     id: int
-    documento_id: int
+    documento_id: Optional[int] = None
     titulo: str
     objetivo: Optional[str] = None
     horas_por_dia: Optional[float] = None
@@ -229,6 +230,7 @@ class TrilhaOut(BaseModel):
     plano: Dict[str, Any] = Field(default_factory=dict)
     meta: Optional[Dict[str, Any]] = None
     status: str
+    origem: Optional[str] = None
     criado_em: Optional[str] = None
     atualizado_em: Optional[str] = None
     etapas: Optional[List[TrilhaEtapaOut]] = None
@@ -236,13 +238,14 @@ class TrilhaOut(BaseModel):
 
 class TrilhaResumoOut(BaseModel):
     id: int
-    documento_id: int
+    documento_id: Optional[int] = None
     titulo: str
     objetivo: Optional[str] = None
     horas_por_dia: Optional[float] = None
     semanas: Optional[int] = None
     etapa_atual: int
     status: str
+    origem: Optional[str] = None
     criado_em: Optional[str] = None
     atualizado_em: Optional[str] = None
     total_etapas: int
@@ -252,6 +255,63 @@ class TrilhaResumoOut(BaseModel):
 class TrilhasListResponse(BaseModel):
     trilhas: List[TrilhaResumoOut]
     total: int
+
+
+# --- Modo professor: criar/editar trilha manualmente ---
+
+
+class EtapaManualIn(BaseModel):
+    modulo: Optional[str] = Field(default=None, max_length=120)
+    titulo: str = Field(..., min_length=1, max_length=200)
+    objetivo: Optional[str] = Field(default=None, max_length=1000)
+    conteudo: Optional[str] = Field(
+        default=None, description="Material/instruções escritos pelo professor (texto livre)."
+    )
+    pagina_inicio: Optional[int] = Field(default=None, ge=0)
+    pagina_fim: Optional[int] = Field(default=None, ge=0)
+    tema: Optional[str] = Field(default=None, max_length=200)
+    palavras_chave: List[str] = Field(default_factory=list)
+    duracao_minutos: Optional[int] = Field(default=None, ge=0, le=1440)
+
+
+class TrilhaManualCreate(BaseModel):
+    titulo: str = Field(..., min_length=1, max_length=200)
+    objetivo: Optional[str] = Field(default=None, max_length=500)
+    documento_id: Optional[int] = Field(
+        default=None, ge=1, description="Material opcional vinculado à trilha."
+    )
+    resumo: Optional[str] = Field(default=None, max_length=1000)
+    horas_por_dia: Optional[float] = Field(default=1.0, ge=0.25, le=12)
+    semanas: Optional[int] = Field(default=None, ge=1, le=52)
+    etapas: List[EtapaManualIn] = Field(default_factory=list)
+
+
+class TrilhaUpdate(BaseModel):
+    titulo: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    objetivo: Optional[str] = Field(default=None, max_length=500)
+    horas_por_dia: Optional[float] = Field(default=None, ge=0.25, le=12)
+    semanas: Optional[int] = Field(default=None, ge=1, le=52)
+    status: Optional[str] = Field(default=None, max_length=30)
+    documento_id: Optional[int] = Field(default=None, ge=1)
+
+
+class EtapaUpdate(BaseModel):
+    """Edição da etapa: conteúdo e/ou status (todos opcionais)."""
+
+    modulo: Optional[str] = Field(default=None, max_length=120)
+    titulo: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    objetivo: Optional[str] = Field(default=None, max_length=1000)
+    conteudo: Optional[str] = None
+    pagina_inicio: Optional[int] = Field(default=None, ge=0)
+    pagina_fim: Optional[int] = Field(default=None, ge=0)
+    tema: Optional[str] = Field(default=None, max_length=200)
+    palavras_chave: Optional[List[str]] = None
+    duracao_minutos: Optional[int] = Field(default=None, ge=0, le=1440)
+    status: Optional[StatusEtapaTrilha] = None
+
+
+class EtapasReorder(BaseModel):
+    ordem: List[int] = Field(..., description="IDs das etapas na nova ordem.")
 
 
 class SalaGerarRequest(BaseModel):
@@ -315,3 +375,190 @@ class EtapaStatusUpdate(BaseModel):
 
 class AtividadeStatusUpdate(BaseModel):
     status: StatusAtividadeSala
+
+
+# ---------------------------------------------------------------------------
+# Flash cards (estilo NotebookLM): frente/verso gerados do material + estudo
+# com repetição espaçada (SM-2).
+# ---------------------------------------------------------------------------
+
+# Nota de auto-avaliação no estudo → qualidade SM-2.
+# 0 = Errei (again) | 1 = Difícil (hard) | 2 = Bom (good) | 3 = Fácil (easy)
+NotaRevisao = Literal[0, 1, 2, 3]
+
+
+class Flashcard(BaseModel):
+    id: Optional[int] = Field(
+        default=None,
+        description="ID no banco (presente após salvar o deck ou ao carregar do histórico).",
+    )
+    frente: str = Field(..., description="Pergunta / termo / conceito (lado da frente).")
+    verso: str = Field(..., description="Resposta / definição (lado de trás).")
+    dica: Optional[str] = Field(default=None, description="Dica opcional exibida sob demanda.")
+    tags: List[str] = Field(default_factory=list)
+    dificuldade: Optional[Dificuldade] = None
+    referencia: Optional[str] = Field(
+        default=None,
+        description="Trecho/citação do material que fundamenta o card.",
+    )
+    fonte: Optional[FonteQuestao] = None
+    # Estado SRS (preenchido ao carregar do banco)
+    repeticoes: Optional[int] = None
+    intervalo_dias: Optional[int] = None
+    ease_factor: Optional[float] = None
+    due_em: Optional[str] = None
+    ultima_revisao_em: Optional[str] = None
+    lapsos: Optional[int] = None
+    total_revisoes: Optional[int] = None
+
+
+class FlashcardsGerarTextoRequest(BaseModel):
+    texto: str = Field(..., min_length=50, description="Conteúdo base para os flashcards")
+    num_flashcards_por_chunk: int = Field(default=5, ge=1, le=20)
+    max_chunks: Optional[int] = Field(default=None, ge=1, le=50)
+    tema: Optional[str] = Field(default=None, description="Foco temático dos cards")
+    palavras_chave: Optional[List[str]] = Field(
+        default=None, description="Filtra trechos contendo pelo menos uma das palavras"
+    )
+    pagina_inicio: Optional[int] = Field(default=None, ge=1)
+    pagina_fim: Optional[int] = Field(default=None, ge=1)
+    instrucoes_extras: Optional[str] = Field(default=None, max_length=500)
+    idioma: Idioma = Field(default="pt", description="pt | en | it")
+    titulo: Optional[str] = Field(default=None, max_length=200, description="Título do deck")
+
+
+class FlashcardManualIn(BaseModel):
+    frente: str = Field(..., min_length=1)
+    verso: str = Field(..., min_length=1)
+    dica: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    dificuldade: Optional[Dificuldade] = None
+    referencia: Optional[str] = None
+
+
+class DeckCriarRequest(BaseModel):
+    """Cria um deck vazio ou com cards manuais (sem IA)."""
+
+    titulo: str = Field(..., min_length=1, max_length=200)
+    descricao: Optional[str] = Field(default=None, max_length=1000)
+    tema: Optional[str] = None
+    idioma: Idioma = Field(default="pt")
+    documento_id: Optional[int] = Field(default=None, ge=1)
+    cards: List[FlashcardManualIn] = Field(default_factory=list)
+
+
+class FlashcardUpdate(BaseModel):
+    frente: Optional[str] = Field(default=None, min_length=1)
+    verso: Optional[str] = Field(default=None, min_length=1)
+    dica: Optional[str] = None
+    tags: Optional[List[str]] = None
+    dificuldade: Optional[Dificuldade] = None
+    referencia: Optional[str] = None
+
+
+class FlashcardOut(Flashcard):
+    deck_id: int
+    ordem: int
+
+
+class DeckResumoOut(BaseModel):
+    id: int
+    documento_id: Optional[int] = None
+    titulo: str
+    descricao: Optional[str] = None
+    tema: Optional[str] = None
+    idioma: Optional[str] = None
+    fonte: Optional[str] = None
+    modelo: Optional[str] = None
+    nome_arquivo: Optional[str] = None
+    criado_em: Optional[str] = None
+    total_cards: int = 0
+    cards_due: int = 0
+    cards_novos: int = 0
+
+
+class DeckOut(DeckResumoOut):
+    meta: Optional[Dict[str, Any]] = None
+    cards: List[FlashcardOut] = Field(default_factory=list)
+
+
+class DecksListResponse(BaseModel):
+    decks: List[DeckResumoOut]
+    total: int
+
+
+class FlashcardsGerarResponse(BaseModel):
+    deck: DeckOut
+    meta: Dict[str, Any]
+
+
+class RevisaoIn(BaseModel):
+    nota: NotaRevisao = Field(
+        ..., description="0=Errei, 1=Difícil, 2=Bom, 3=Fácil (auto-avaliação)"
+    )
+    tempo_resposta_ms: Optional[int] = Field(default=None, ge=0)
+
+
+class RevisaoResultado(BaseModel):
+    flashcard_id: int
+    nota: int
+    intervalo_anterior_dias: Optional[int] = None
+    intervalo_novo_dias: int
+    repeticoes: int
+    ease_factor: float
+    due_em: str
+    lapsos: int
+    total_revisoes: int
+
+
+class EstudoResponse(BaseModel):
+    deck_id: Optional[int] = None
+    total_due: int
+    cards: List[FlashcardOut] = Field(default_factory=list)
+
+
+class FlashcardsEstatisticas(BaseModel):
+    decks: int
+    cards: int
+    revisoes: int
+    cards_due_hoje: int
+    cards_novos: int
+    cards_dominados: int
+    por_dificuldade: Dict[str, int] = Field(default_factory=dict)
+    por_idioma: Dict[str, int] = Field(default_factory=dict)
+
+
+class FlashcardProgresso(FlashcardOut):
+    acertos: int = 0
+    erros: int = 0
+    ultima_nota: Optional[int] = None
+    status: str = "novo"  # novo | aprendendo | dominado
+
+
+class DeckProgressoOut(BaseModel):
+    id: int
+    titulo: str
+    nome_arquivo: Optional[str] = None
+    tema: Optional[str] = None
+    total_cards: int = 0
+    cards_due: int = 0
+    cards_novos: int = 0
+    cards_revisados: int = 0
+    cards_dominados: int = 0
+    total_revisoes: int = 0
+    cards: List[FlashcardProgresso] = Field(default_factory=list)
+
+
+class RevisaoHistoricoItem(BaseModel):
+    id: int
+    nota: int
+    intervalo_anterior: Optional[int] = None
+    intervalo_novo: Optional[int] = None
+    ease_factor: Optional[float] = None
+    tempo_resposta_ms: Optional[int] = None
+    criado_em: Optional[str] = None
+
+
+class RevisoesHistoricoResponse(BaseModel):
+    flashcard_id: int
+    revisoes: List[RevisaoHistoricoItem] = Field(default_factory=list)

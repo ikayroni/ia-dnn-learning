@@ -51,56 +51,214 @@ def _row_trilha(row: Any, *, etapas: Optional[list] = None, salas: Optional[list
     return d
 
 
+def _insert_etapa(conn, trilha_id: int, e: dict, ordem: int) -> int:
+    cur = conn.execute(
+        """INSERT INTO trilha_etapas
+           (trilha_id, ordem, modulo, titulo, objetivo, conteudo,
+            pagina_inicio, pagina_fim, tema, palavras_chave, duracao_minutos)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            trilha_id,
+            ordem,
+            e.get("modulo"),
+            e.get("titulo") or f"Etapa {ordem}",
+            e.get("objetivo"),
+            e.get("conteudo"),
+            e.get("pagina_inicio"),
+            e.get("pagina_fim"),
+            e.get("tema"),
+            json.dumps(e.get("palavras_chave") or [], ensure_ascii=False),
+            e.get("duracao_minutos"),
+        ),
+    )
+    return int(cur.lastrowid)
+
+
 def create_trilha(
     *,
-    documento_id: int,
+    documento_id: Optional[int] = None,
     titulo: str,
     objetivo: Optional[str],
-    horas_por_dia: float,
-    semanas: int,
-    plano: dict,
+    horas_por_dia: Optional[float],
+    semanas: Optional[int],
+    plano: Optional[dict] = None,
     meta: Optional[dict],
     etapas: list[dict],
+    origem: str = "ia",
 ) -> int:
     init_db()
     with connect() as conn:
         cur = conn.execute(
             """INSERT INTO trilhas
                (documento_id, titulo, objetivo, horas_por_dia, semanas,
-                etapa_atual, plano_json, meta_json)
-               VALUES (?, ?, ?, ?, ?, 1, ?, ?)""",
+                etapa_atual, plano_json, meta_json, origem)
+               VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)""",
             (
                 documento_id,
                 titulo,
                 objetivo,
                 horas_por_dia,
                 semanas,
-                json.dumps(plano, ensure_ascii=False),
+                json.dumps(plano or {}, ensure_ascii=False),
                 json.dumps(meta, ensure_ascii=False) if meta else None,
+                origem,
             ),
         )
         trilha_id = int(cur.lastrowid)
-        for e in etapas:
-            conn.execute(
-                """INSERT INTO trilha_etapas
-                   (trilha_id, ordem, modulo, titulo, objetivo,
-                    pagina_inicio, pagina_fim, tema, palavras_chave, duracao_minutos)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    trilha_id,
-                    e["ordem"],
-                    e.get("modulo"),
-                    e["titulo"],
-                    e.get("objetivo"),
-                    e.get("pagina_inicio"),
-                    e.get("pagina_fim"),
-                    e.get("tema"),
-                    json.dumps(e.get("palavras_chave") or [], ensure_ascii=False),
-                    e.get("duracao_minutos"),
-                ),
-            )
+        for i, e in enumerate(etapas, start=1):
+            _insert_etapa(conn, trilha_id, e, e.get("ordem") or i)
         conn.commit()
     return trilha_id
+
+
+_TRILHA_EDITAVEL = {"titulo", "objetivo", "horas_por_dia", "semanas", "status", "documento_id"}
+
+
+def update_trilha(trilha_id: int, updates: dict[str, Any]) -> Optional[dict[str, Any]]:
+    init_db()
+    campos = {k: v for k, v in updates.items() if k in _TRILHA_EDITAVEL}
+    with connect() as conn:
+        existe = conn.execute("SELECT id FROM trilhas WHERE id = ?", (trilha_id,)).fetchone()
+        if not existe:
+            return None
+        if campos:
+            sets = ", ".join(f"{k} = ?" for k in campos)
+            params = list(campos.values()) + [trilha_id]
+            conn.execute(
+                f"UPDATE trilhas SET {sets}, atualizado_em = datetime('now') WHERE id = ?",
+                params,
+            )
+            conn.commit()
+    return get_trilha(trilha_id)
+
+
+_ETAPA_EDITAVEL = {
+    "modulo",
+    "titulo",
+    "objetivo",
+    "conteudo",
+    "pagina_inicio",
+    "pagina_fim",
+    "tema",
+    "duracao_minutos",
+    "status",
+}
+
+
+def create_etapa(trilha_id: int, etapa: dict[str, Any]) -> Optional[dict[str, Any]]:
+    init_db()
+    with connect() as conn:
+        tr = conn.execute("SELECT id FROM trilhas WHERE id = ?", (trilha_id,)).fetchone()
+        if not tr:
+            return None
+        row = conn.execute(
+            "SELECT COALESCE(MAX(ordem), 0) AS m FROM trilha_etapas WHERE trilha_id = ?",
+            (trilha_id,),
+        ).fetchone()
+        ordem = int(row["m"]) + 1
+        etapa_id = _insert_etapa(conn, trilha_id, etapa, ordem)
+        conn.execute(
+            "UPDATE trilhas SET atualizado_em = datetime('now') WHERE id = ?", (trilha_id,)
+        )
+        conn.commit()
+    return get_etapa(etapa_id)
+
+
+def update_etapa(etapa_id: int, updates: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """Edita conteúdo da etapa (campos textuais + palavras_chave)."""
+    init_db()
+    campos: dict[str, Any] = {k: v for k, v in updates.items() if k in _ETAPA_EDITAVEL}
+    if "palavras_chave" in updates:
+        kws = updates["palavras_chave"]
+        if isinstance(kws, str):
+            kws = [k.strip() for k in kws.split(",") if k.strip()]
+        campos["palavras_chave"] = json.dumps(kws or [], ensure_ascii=False)
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT trilha_id FROM trilha_etapas WHERE id = ?", (etapa_id,)
+        ).fetchone()
+        if not row:
+            return None
+        if campos:
+            sets = ", ".join(f"{k} = ?" for k in campos)
+            extra = ""
+            if "status" in campos:
+                extra = (
+                    ", concluida_em = datetime('now')"
+                    if campos["status"] == "concluida"
+                    else ", concluida_em = NULL"
+                )
+            conn.execute(
+                f"UPDATE trilha_etapas SET {sets}{extra} WHERE id = ?",
+                list(campos.values()) + [etapa_id],
+            )
+            conn.execute(
+                "UPDATE trilhas SET atualizado_em = datetime('now') WHERE id = ?",
+                (row["trilha_id"],),
+            )
+            conn.commit()
+    return get_etapa(etapa_id)
+
+
+def delete_etapa(etapa_id: int) -> bool:
+    init_db()
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT trilha_id FROM trilha_etapas WHERE id = ?", (etapa_id,)
+        ).fetchone()
+        if not row:
+            return False
+        trilha_id = int(row["trilha_id"])
+        conn.execute("DELETE FROM trilha_etapas WHERE id = ?", (etapa_id,))
+        # Reordena as etapas restantes para manter a sequência 1..N
+        restantes = conn.execute(
+            "SELECT id FROM trilha_etapas WHERE trilha_id = ? ORDER BY ordem",
+            (trilha_id,),
+        ).fetchall()
+        for i, r in enumerate(restantes, start=1):
+            conn.execute("UPDATE trilha_etapas SET ordem = ? WHERE id = ?", (i, r["id"]))
+        # Garante etapa_atual válida
+        total = len(restantes)
+        if total == 0:
+            conn.execute("UPDATE trilhas SET etapa_atual = 1 WHERE id = ?", (trilha_id,))
+        else:
+            conn.execute(
+                "UPDATE trilhas SET etapa_atual = MIN(etapa_atual, ?) WHERE id = ?",
+                (total, trilha_id),
+            )
+        conn.execute(
+            "UPDATE trilhas SET atualizado_em = datetime('now') WHERE id = ?", (trilha_id,)
+        )
+        conn.commit()
+    return True
+
+
+def reorder_etapas(trilha_id: int, ordered_ids: list[int]) -> Optional[dict[str, Any]]:
+    init_db()
+    with connect() as conn:
+        tr = conn.execute("SELECT id FROM trilhas WHERE id = ?", (trilha_id,)).fetchone()
+        if not tr:
+            return None
+        atuais = {
+            int(r["id"])
+            for r in conn.execute(
+                "SELECT id FROM trilha_etapas WHERE trilha_id = ?", (trilha_id,)
+            ).fetchall()
+        }
+        # Aplica a nova ordem para os ids válidos, na sequência informada
+        ordem = 0
+        for eid in ordered_ids:
+            if int(eid) in atuais:
+                ordem += 1
+                conn.execute(
+                    "UPDATE trilha_etapas SET ordem = ? WHERE id = ? AND trilha_id = ?",
+                    (ordem, int(eid), trilha_id),
+                )
+        conn.execute(
+            "UPDATE trilhas SET atualizado_em = datetime('now') WHERE id = ?", (trilha_id,)
+        )
+        conn.commit()
+    return get_trilha(trilha_id)
 
 
 def list_trilhas(*, documento_id: Optional[int] = None, limit: int = 50) -> list[dict[str, Any]]:
