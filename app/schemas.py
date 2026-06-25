@@ -53,6 +53,30 @@ class Questao(BaseModel):
     estilo: Optional[EstiloQuestao] = None
 
 
+class TraduzirItemIn(BaseModel):
+    id: str = Field(..., description="Identificador da questão (ecoado na resposta)")
+    enunciado: str = Field(default="")
+    alternativas: List[str] = Field(default_factory=list)
+    explicacao: Optional[str] = None
+
+
+class TraduzirItemOut(BaseModel):
+    id: str
+    enunciado: str = ""
+    alternativas: List[str] = Field(default_factory=list)
+    explicacao: Optional[str] = None
+
+
+class TraduzirRequest(BaseModel):
+    idioma: Literal["pt", "en"] = Field(default="pt", description="Idioma de destino")
+    itens: List[TraduzirItemIn] = Field(..., min_length=1, max_length=30)
+
+
+class TraduzirResponse(BaseModel):
+    idioma: str
+    itens: List[TraduzirItemOut]
+
+
 class GerarTextoRequest(BaseModel):
     texto: str = Field(..., min_length=50, description="Conteúdo base para as questões")
     num_questoes_por_chunk: int = Field(default=2, ge=1, le=10)
@@ -236,6 +260,16 @@ class TrilhaOut(BaseModel):
     etapas: Optional[List[TrilhaEtapaOut]] = None
 
 
+class TrilhaEstudoStats(BaseModel):
+    trilha_id: Optional[int] = None
+    cards_total: int = 0
+    cards_due: int = 0
+    cards_novos: int = 0
+    etapa_pendente: bool = False
+    etapa_atual_titulo: Optional[str] = None
+    itens_hoje: int = 0
+
+
 class TrilhaResumoOut(BaseModel):
     id: int
     documento_id: Optional[int] = None
@@ -250,6 +284,19 @@ class TrilhaResumoOut(BaseModel):
     atualizado_em: Optional[str] = None
     total_etapas: int
     etapas_concluidas: int
+    estudo: Optional[TrilhaEstudoStats] = None
+
+
+class TrilhaEstudoResponse(BaseModel):
+    trilha_id: int
+    titulo: str
+    documento_id: Optional[int] = None
+    etapa_atual: int
+    total_itens: int = 0
+    cards_due: int = 0
+    cards_novos: int = 0
+    itens_hoje: int = 0
+    itens: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class TrilhasListResponse(BaseModel):

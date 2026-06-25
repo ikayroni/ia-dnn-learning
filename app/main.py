@@ -40,16 +40,21 @@ from app.schemas import (
     SalaOut,
     SalasListResponse,
     TemasResponse,
+    TraduzirRequest,
+    TraduzirResponse,
     QuestaoUpdate,
     TentativaIn,
     TentativaResultado,
     TrilhaEtapaOut,
     TrilhaGerarRequest,
     TrilhaManualCreate,
+    TrilhaEstudoResponse,
+    TrilhaEstudoStats,
     TrilhaOut,
     TrilhasListResponse,
     TrilhaUpdate,
 )
+from app.trilha_estudo_service import get_estudo_stats, montar_fila_estudo
 from app.trilha_service import (
     avancar_etapa_trilha,
     gerar_sala,
@@ -422,6 +427,25 @@ def listar_ocr_jobs(only_active: bool = False, limit: int = 50):
     )
 
 
+@app.post("/traduzir", response_model=TraduzirResponse)
+def traduzir(body: TraduzirRequest):
+    """Traduz questões (enunciado + alternativas + explicação) para pt ou en via Bedrock.
+
+    Usado pelo módulo de simulados para exibir questões (geralmente em italiano)
+    no idioma escolhido pelo aluno. O cache fica no consumidor (backend Node).
+    """
+    from app.bedrock import traduzir_questoes
+
+    itens = [it.model_dump() for it in body.itens]
+    try:
+        result = traduzir_questoes(itens, idioma_destino=body.idioma)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return TraduzirResponse(idioma=body.idioma, itens=result.get("itens", []))
+
+
 @app.post("/gerar/texto", response_model=GerarResponse)
 def gerar_texto(body: GerarTextoRequest):
     try:
@@ -769,7 +793,31 @@ def trilhas_listar(documento_id: Optional[int] = None, limit: int = 50):
     if limit < 1 or limit > 200:
         raise HTTPException(status_code=400, detail="limit entre 1 e 200")
     items = list_trilhas(documento_id=documento_id, limit=limit)
-    return TrilhasListResponse(trilhas=items, total=len(items))
+    enriched = []
+    for t in items:
+        stats = get_estudo_stats(int(t["id"]))
+        row = dict(t)
+        row["estudo"] = stats
+        enriched.append(row)
+    return TrilhasListResponse(trilhas=enriched, total=len(enriched))
+
+
+@app.get("/trilhas/{trilha_id}/estudo/stats", response_model=TrilhaEstudoStats)
+def trilha_estudo_stats(trilha_id: int):
+    stats = get_estudo_stats(trilha_id)
+    if not stats:
+        raise HTTPException(status_code=404, detail="Trilha não encontrada")
+    return TrilhaEstudoStats(**stats)
+
+
+@app.get("/trilhas/{trilha_id}/estudo", response_model=TrilhaEstudoResponse)
+def trilha_estudo_fila(trilha_id: int, limit: int = 30):
+    if limit < 1 or limit > 80:
+        raise HTTPException(status_code=400, detail="limit entre 1 e 80")
+    fila = montar_fila_estudo(trilha_id, limit=limit)
+    if not fila:
+        raise HTTPException(status_code=404, detail="Trilha não encontrada")
+    return TrilhaEstudoResponse(**fila)
 
 
 @app.get("/trilhas/{trilha_id}", response_model=TrilhaOut)

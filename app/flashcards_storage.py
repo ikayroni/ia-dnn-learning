@@ -151,6 +151,8 @@ def save_deck(
     titulo: str,
     cards: list[Flashcard] | list[dict[str, Any]],
     documento_id: Optional[int] = None,
+    trilha_id: Optional[int] = None,
+    etapa_id: Optional[int] = None,
     descricao: Optional[str] = None,
     tema: Optional[str] = None,
     idioma: Optional[str] = None,
@@ -168,10 +170,12 @@ def save_deck(
     with connect() as conn:
         cur = conn.execute(
             """INSERT INTO flashcard_decks
-               (documento_id, titulo, descricao, tema, idioma, fonte, modelo, meta_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               (documento_id, trilha_id, etapa_id, titulo, descricao, tema, idioma, fonte, modelo, meta_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 documento_id,
+                trilha_id,
+                etapa_id,
                 titulo,
                 descricao,
                 tema,
@@ -314,7 +318,6 @@ def delete_deck(deck_id: int) -> bool:
 def get_due_cards(
     *, deck_id: Optional[int] = None, limit: int = 20, incluir_novos: bool = True
 ) -> dict[str, Any]:
-    """Cards a revisar agora (due_em <= now). Ordena vencidos primeiro, depois novos."""
     init_db()
     now = _iso(_now())
     wheres = ["due_em <= ?"]
@@ -543,6 +546,88 @@ def get_deck_progresso(deck_id: int) -> Optional[dict[str, Any]]:
         "total_revisoes": soma_revisoes,
         "cards": cards,
     }
+
+
+def _deck_ids_trilha(conn, trilha_id: int, documento_id: Optional[int]) -> list[int]:
+    """Decks vinculados à trilha ou ao mesmo material."""
+    wheres = ["trilha_id = ?"]
+    params: list[Any] = [trilha_id]
+    if documento_id is not None:
+        wheres.append("documento_id = ?")
+        params.append(documento_id)
+    where_sql = " OR ".join(wheres)
+    rows = conn.execute(
+        f"SELECT id FROM flashcard_decks WHERE {where_sql}",
+        tuple(params),
+    ).fetchall()
+    return list({int(r["id"]) for r in rows})
+
+
+def count_cards_trilha(*, trilha_id: int, documento_id: Optional[int] = None) -> dict[str, int]:
+    """Agrega due/novos/total dos baralhos da trilha."""
+    init_db()
+    now = _iso(_now())
+    with connect() as conn:
+        deck_ids = _deck_ids_trilha(conn, trilha_id, documento_id)
+        if not deck_ids:
+            return {"cards_total": 0, "cards_due": 0, "cards_novos": 0}
+        placeholders = ",".join("?" * len(deck_ids))
+        total = int(
+            conn.execute(
+                f"SELECT COUNT(*) AS c FROM flashcards WHERE deck_id IN ({placeholders})",
+                deck_ids,
+            ).fetchone()["c"]
+        )
+        due = int(
+            conn.execute(
+                f"""SELECT COUNT(*) AS c FROM flashcards
+                    WHERE deck_id IN ({placeholders}) AND due_em <= ?""",
+                (*deck_ids, now),
+            ).fetchone()["c"]
+        )
+        novos = int(
+            conn.execute(
+                f"""SELECT COUNT(*) AS c FROM flashcards
+                    WHERE deck_id IN ({placeholders}) AND total_revisoes = 0""",
+                deck_ids,
+            ).fetchone()["c"]
+        )
+    return {"cards_total": total, "cards_due": due, "cards_novos": novos}
+
+
+def get_due_cards_trilha(
+    *,
+    trilha_id: int,
+    documento_id: Optional[int] = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Cards due/novos dos baralhos ligados à trilha."""
+    init_db()
+    now = _iso(_now())
+    with connect() as conn:
+        deck_ids = _deck_ids_trilha(conn, trilha_id, documento_id)
+        if not deck_ids:
+            return []
+        placeholders = ",".join("?" * len(deck_ids))
+        rows = conn.execute(
+            f"""SELECT * FROM flashcards
+                WHERE deck_id IN ({placeholders}) AND due_em <= ?
+                ORDER BY (total_revisoes = 0) ASC, due_em ASC
+                LIMIT ?""",
+            (*deck_ids, now, limit),
+        ).fetchall()
+    return [_card_row_to_dict(r) for r in rows]
+
+
+def vincular_deck_trilha(deck_id: int, trilha_id: int, etapa_id: Optional[int] = None) -> bool:
+    init_db()
+    with connect() as conn:
+        cur = conn.execute(
+            "UPDATE flashcard_decks SET trilha_id = ?, etapa_id = ? WHERE id = ?",
+            (trilha_id, etapa_id, deck_id),
+        )
+        conn.commit()
+    return cur.rowcount > 0
 
 
 def get_estatisticas() -> dict[str, Any]:

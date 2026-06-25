@@ -150,6 +150,8 @@ CREATE INDEX IF NOT EXISTS idx_ativ_sala ON sala_atividades(sala_id, ordem);
 CREATE TABLE IF NOT EXISTS flashcard_decks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     documento_id INTEGER REFERENCES documentos(id) ON DELETE SET NULL,
+    trilha_id INTEGER REFERENCES trilhas(id) ON DELETE SET NULL,
+    etapa_id INTEGER REFERENCES trilha_etapas(id) ON DELETE SET NULL,
     titulo TEXT NOT NULL,
     descricao TEXT,
     tema TEXT,
@@ -224,6 +226,10 @@ _MIGRATIONS = {
     "trilha_etapas": [
         ("conteudo", "TEXT"),
     ],
+    "flashcard_decks": [
+        ("trilha_id", "INTEGER REFERENCES trilhas(id) ON DELETE SET NULL"),
+        ("etapa_id", "INTEGER REFERENCES trilha_etapas(id) ON DELETE SET NULL"),
+    ],
 }
 
 
@@ -237,6 +243,10 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         for col_name, col_type in cols:
             if col_name not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}")
+    # Índice em trilha_id só após a coluna existir (bancos antigos).
+    fc_cols = {row["name"] for row in conn.execute("PRAGMA table_info(flashcard_decks)")}
+    if "trilha_id" in fc_cols:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_deck_trilha ON flashcard_decks(trilha_id)")
     conn.commit()
 
 

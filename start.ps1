@@ -1,4 +1,4 @@
-# Sobe a API com venv. Mata workers antigos; se 8000 estiver presa, usa 8002.
+# Sobe a API com venv na porta 8002 (padrão).
 $ErrorActionPreference = "SilentlyContinue"
 Set-Location $PSScriptRoot
 
@@ -12,13 +12,7 @@ foreach ($port in 8000, 8001, 8002) {
 }
 Start-Sleep -Seconds 2
 
-$port = 8000
-$test = Test-NetConnection -ComputerName 127.0.0.1 -Port 8000 -WarningAction SilentlyContinue
-if ($test.TcpTestSucceeded) {
-    Write-Host "Porta 8000 ocupada (pode ser processo fantasma). Usando 8002."
-    $port = 8002
-}
-
+$port = 8002
 $env:PORT = "$port"
 Write-Host "Iniciando em http://localhost:$port  (confira GET /api/build)"
 & "$PSScriptRoot\.venv\Scripts\python.exe" run.py

@@ -417,6 +417,64 @@ def _converse_json(system: str, user: str, *, max_tokens: int = 4000, temperatur
     return _parse_json_response(raw)
 
 
+def traduzir_questoes(
+    itens: list[dict],
+    *,
+    idioma_destino: str = "pt",
+) -> dict:
+    """Traduz uma lista de questões (enunciado, alternativas e, se houver, explicação)
+    preservando o sentido clínico e a estrutura. Idioma de origem é detectado
+    automaticamente (o material costuma estar em italiano).
+
+    Cada item de entrada: {"id": str, "enunciado": str, "alternativas": [str, ...],
+    "explicacao": str | None}. Retorna {"itens": [ {mesma estrutura traduzida} ]}.
+    """
+    idioma_nome = IDIOMA_NOMES.get(idioma_destino, IDIOMA_NOMES["pt"])
+    if not isinstance(itens, list) or not itens:
+        return {"itens": []}
+
+    payload = []
+    for it in itens:
+        payload.append(
+            {
+                "id": str(it.get("id", "")),
+                "enunciado": it.get("enunciado") or "",
+                "alternativas": it.get("alternativas") or [],
+                "explicacao": it.get("explicacao") or None,
+            }
+        )
+
+    system = f"""Você é um tradutor médico profissional especializado em questões de provas
+de Residência/Revalida/USMLE. Traduza FIELMENTE para {idioma_nome}.
+Regras:
+- Detecte automaticamente o idioma de origem (normalmente italiano).
+- Traduza enunciado, TODAS as alternativas e a explicação (quando houver).
+- NÃO altere o sentido clínico, valores, doses, siglas de exames ou o gabarito.
+- Use terminologia médica padrão do idioma de destino.
+- Mantenha a MESMA quantidade e ORDEM das alternativas.
+- NÃO inclua letras (A), B)...) no texto das alternativas; traduza apenas o conteúdo.
+- Preserve o campo "id" exatamente como recebido.
+Responda APENAS com JSON válido (sem markdown, sem comentários, sem texto fora do JSON)."""
+
+    user = f"""Traduza para {idioma_nome} os itens abaixo.
+
+Formato JSON obrigatório de saída (sem markdown):
+{{
+  "itens": [
+    {{ "id": "...", "enunciado": "...", "alternativas": ["...", "..."], "explicacao": "... ou null" }}
+  ]
+}}
+
+ITENS (JSON):
+{json.dumps(payload, ensure_ascii=False)}"""
+
+    data = _converse_json(system, user, max_tokens=6000, temperature=0.15)
+    out = data.get("itens", [])
+    if not isinstance(out, list):
+        return {"itens": []}
+    return {"itens": out}
+
+
 def gerar_flashcards(
     chunk_text: str,
     *,
