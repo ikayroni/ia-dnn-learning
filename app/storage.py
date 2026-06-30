@@ -615,6 +615,7 @@ def get_questao_with_tentativas(questao_id: int) -> Optional[dict[str, Any]]:
                 "acertou": bool(t["acertou"]),
                 "tempo_resposta_ms": t["tempo_resposta_ms"],
                 "comentario": t["comentario"],
+                "dificuldade_percebida": t["dificuldade_percebida"] if "dificuldade_percebida" in t.keys() else None,
                 "criado_em": t["criado_em"],
             }
             for t in tentativas
@@ -628,6 +629,7 @@ def registrar_tentativa(
     resposta_usuario: str,
     tempo_resposta_ms: Optional[int] = None,
     comentario: Optional[str] = None,
+    dificuldade_percebida: Optional[str] = None,
 ) -> dict[str, Any]:
     """Registra a resposta do usuário. Compara com o gabarito da questão e marca acertou/errou.
 
@@ -646,9 +648,9 @@ def registrar_tentativa(
         acertou = _comparar_resposta(resposta, gabarito)
         cur = conn.execute(
             """INSERT INTO tentativas
-               (questao_id, resposta_usuario, acertou, tempo_resposta_ms, comentario)
-               VALUES (?, ?, ?, ?, ?)""",
-            (questao_id, resposta, 1 if acertou else 0, tempo_resposta_ms, comentario),
+               (questao_id, resposta_usuario, acertou, tempo_resposta_ms, comentario, dificuldade_percebida)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (questao_id, resposta, 1 if acertou else 0, tempo_resposta_ms, comentario, dificuldade_percebida),
         )
         conn.commit()
         tentativa_id = int(cur.lastrowid)
@@ -667,6 +669,22 @@ def registrar_tentativa(
             "explicacao": q["explicacao"],
             "explicacoes_alternativas": expl_alts,
         }
+
+
+def atualizar_tentativa_feedback(
+    tentativa_id: int,
+    *,
+    dificuldade_percebida: str,
+) -> None:
+    init_db()
+    with connect() as conn:
+        cur = conn.execute(
+            "UPDATE tentativas SET dificuldade_percebida = ? WHERE id = ?",
+            (dificuldade_percebida, tentativa_id),
+        )
+        conn.commit()
+        if cur.rowcount == 0:
+            raise KeyError(f"tentativa_id {tentativa_id} não encontrada")
 
 
 def _comparar_resposta(resposta: str, gabarito: str) -> bool:

@@ -108,6 +108,7 @@ def _card_row_to_dict(row: Any) -> dict[str, Any]:
         "ultima_revisao_em": row["ultima_revisao_em"],
         "lapsos": int(row["lapsos"]),
         "total_revisoes": int(row["total_revisoes"]),
+        "imagem_url": row["imagem_url"] if "imagem_url" in row.keys() else None,
     }
 
 
@@ -125,8 +126,8 @@ def _insert_cards(conn, deck_id: int, cards: list[dict[str, Any]], *, start_orde
         cur = conn.execute(
             """INSERT INTO flashcards
                (deck_id, ordem, frente, verso, dica, tags_json, dificuldade,
-                referencia, chunk_id, pagina_inicio, pagina_fim, due_em)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                referencia, chunk_id, pagina_inicio, pagina_fim, due_em, imagem_url)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 deck_id,
                 i,
@@ -140,6 +141,7 @@ def _insert_cards(conn, deck_id: int, cards: list[dict[str, Any]], *, start_orde
                 fonte.get("pagina_inicio"),
                 fonte.get("pagina_fim"),
                 now,
+                c.get("imagem_url"),
             ),
         )
         ids.append(int(cur.lastrowid))
@@ -346,7 +348,8 @@ def get_due_cards(
 
 
 def registrar_revisao(
-    *, flashcard_id: int, nota: int, tempo_resposta_ms: Optional[int] = None
+    *, flashcard_id: int, nota: int, tempo_resposta_ms: Optional[int] = None,
+    comentario: Optional[str] = None,
 ) -> dict[str, Any]:
     init_db()
     with connect() as conn:
@@ -385,8 +388,8 @@ def registrar_revisao(
         )
         conn.execute(
             """INSERT INTO flashcard_revisoes
-               (flashcard_id, nota, intervalo_anterior, intervalo_novo, ease_factor, tempo_resposta_ms)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+               (flashcard_id, nota, intervalo_anterior, intervalo_novo, ease_factor, tempo_resposta_ms, comentario)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 flashcard_id,
                 int(nota),
@@ -394,6 +397,7 @@ def registrar_revisao(
                 nxt["intervalo_dias"],
                 nxt["ease_factor"],
                 tempo_resposta_ms,
+                comentario,
             ),
         )
         conn.commit()
@@ -426,6 +430,7 @@ def update_card(card_id: int, updates: dict[str, Any]) -> Optional[dict[str, Any
             "dica": "dica",
             "dificuldade": "dificuldade",
             "referencia": "referencia",
+            "imagem_url": "imagem_url",
         }
         for key, col in field_map.items():
             if key in updates:
@@ -465,7 +470,7 @@ def get_card_revisoes(card_id: int, limit: int = 50) -> list[dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
             """SELECT id, nota, intervalo_anterior, intervalo_novo, ease_factor,
-                      tempo_resposta_ms, criado_em
+                      tempo_resposta_ms, comentario, criado_em
                FROM flashcard_revisoes
                WHERE flashcard_id = ?
                ORDER BY criado_em DESC
@@ -480,6 +485,7 @@ def get_card_revisoes(card_id: int, limit: int = 50) -> list[dict[str, Any]]:
             "intervalo_novo": r["intervalo_novo"],
             "ease_factor": r["ease_factor"],
             "tempo_resposta_ms": r["tempo_resposta_ms"],
+            "comentario": r["comentario"],
             "criado_em": r["criado_em"],
         }
         for r in rows
@@ -515,6 +521,8 @@ def get_deck_progresso(deck_id: int) -> Optional[dict[str, Any]]:
     revisados = 0
     dominados = 0
     soma_revisoes = 0
+    cards_com_erro = 0
+    total_erros = 0
     for r in rows:
         base = _card_row_to_dict(r)
         status = _status_card(base["total_revisoes"], base["intervalo_dias"])
@@ -523,12 +531,17 @@ def get_deck_progresso(deck_id: int) -> Optional[dict[str, Any]]:
         if status == "dominado":
             dominados += 1
         soma_revisoes += base["total_revisoes"]
+        erros = int(r["erros"] or 0)
+        ultima = None if r["ultima_nota"] is None else int(r["ultima_nota"])
+        total_erros += erros
+        if ultima is not None and ultima < 2:
+            cards_com_erro += 1
         cards.append(
             {
                 **base,
                 "acertos": int(r["acertos"] or 0),
-                "erros": int(r["erros"] or 0),
-                "ultima_nota": None if r["ultima_nota"] is None else int(r["ultima_nota"]),
+                "erros": erros,
+                "ultima_nota": ultima,
                 "status": status,
             }
         )
@@ -544,6 +557,8 @@ def get_deck_progresso(deck_id: int) -> Optional[dict[str, Any]]:
         "cards_revisados": revisados,
         "cards_dominados": dominados,
         "total_revisoes": soma_revisoes,
+        "cards_com_erro": cards_com_erro,
+        "total_erros": total_erros,
         "cards": cards,
     }
 

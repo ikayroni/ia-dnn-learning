@@ -207,6 +207,9 @@ CREATE INDEX IF NOT EXISTS idx_rev_data ON flashcard_revisoes(criado_em DESC);
 
 # Colunas adicionadas em versoes mais novas; aplicadas via ALTER TABLE se faltarem.
 _MIGRATIONS = {
+    "tentativas": [
+        ("dificuldade_percebida", "TEXT"),
+    ],
     "geracoes": [
         ("idioma", "TEXT"),
         ("estilo", "TEXT"),
@@ -229,6 +232,12 @@ _MIGRATIONS = {
     "flashcard_decks": [
         ("trilha_id", "INTEGER REFERENCES trilhas(id) ON DELETE SET NULL"),
         ("etapa_id", "INTEGER REFERENCES trilha_etapas(id) ON DELETE SET NULL"),
+    ],
+    "flashcards": [
+        ("imagem_url", "TEXT"),
+    ],
+    "flashcard_revisoes": [
+        ("comentario", "TEXT"),
     ],
 }
 

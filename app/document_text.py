@@ -167,3 +167,65 @@ def load_document_for_id(
         "para gravar cache automático; "
         "(4) faça OCR do PDF escaneado com POST /ocr/pdf."
     )
+
+
+def merge_extracted_documents(
+    docs: list["ExtractedDocument"],
+    *,
+    labels: Optional[list[str]] = None,
+) -> "ExtractedDocument":
+    """Concatena vários documentos em um único texto com marcadores de página ajustados."""
+    from app.pdf_extractor import ExtractedDocument
+
+    parts: list[str] = []
+    markers: list[tuple[int, int]] = []
+    offset = 0
+    page_count = 0
+    for i, doc in enumerate(docs):
+        label = labels[i] if labels and i < len(labels) else f"Documento {i + 1}"
+        header = f"\n\n--- {label} ---\n\n"
+        if parts:
+            parts.append(header)
+            offset += len(header)
+        for m_offset, page_num in doc.page_markers:
+            markers.append((offset + m_offset, page_count + page_num))
+        parts.append(doc.text)
+        offset += len(doc.text)
+        page_count += doc.page_count
+    return ExtractedDocument(text="".join(parts), page_count=page_count, page_markers=markers)
+
+
+def ingest_pdf_to_historico(data: bytes, filename: str = "documento.pdf") -> dict[str, Any]:
+    """Extrai texto de um PDF nativo e registra/atualiza o documento no histórico (sem IA)."""
+    from app.pdf_extractor import extract_text_from_pdf, pdf_has_native_text
+    from app.storage import get_documento_by_hash, sha256_bytes, upsert_documento
+
+    if not pdf_has_native_text(data):
+        raise ValueError(
+            "PDF parece escaneado (sem texto selecionável). "
+            "Use o Gerador de Questões com OCR para livros digitalizados."
+        )
+
+    hash_id = sha256_bytes(data)
+    existente = get_documento_by_hash(hash_id)
+    doc = extract_text_from_pdf(data)
+    save_document_text_cache(doc, hash_sha256=hash_id)
+
+    documento_id = upsert_documento(
+        nome_arquivo=filename,
+        hash_sha256=hash_id,
+        paginas=doc.page_count,
+        caracteres=len(doc.text),
+        ocr_job_id=None,
+        fonte="pdf_nativo",
+    )
+    save_document_text_cache(doc, hash_sha256=hash_id, documento_id=documento_id)
+
+    row = get_documento_row(documento_id) or {}
+    return {
+        "documento_id": documento_id,
+        "nome_arquivo": row.get("nome_arquivo") or filename,
+        "paginas": doc.page_count,
+        "caracteres": len(doc.text),
+        "reutilizado": existente is not None,
+    }

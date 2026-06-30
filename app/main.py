@@ -13,9 +13,11 @@ from app.config import BASE_DIR, settings
 from app.generator import (
     discover_topics_from_ocr_job,
     generate_from_documento_id,
+    generate_from_multi_documento_ids,
     generate_from_ocr_job,
     generate_from_pdf_bytes,
     generate_from_text,
+    generate_from_text_persisted,
 )
 from app.ocr_jobs import (
     cleanup_orphan_jobs,
@@ -33,6 +35,7 @@ from app.schemas import (
     EtapaUpdate,
     GerarResponse,
     GerarTextoRequest,
+    GerarMultiDocumentosRequest,
     OcrJobCreated,
     OcrJobStatus,
     OcrJobsList,
@@ -44,6 +47,7 @@ from app.schemas import (
     TraduzirResponse,
     QuestaoUpdate,
     TentativaIn,
+    TentativaFeedbackIn,
     TentativaResultado,
     TrilhaEtapaOut,
     TrilhaGerarRequest,
@@ -86,12 +90,14 @@ from app.storage import (
     list_banco_questoes,
     list_documentos,
     registrar_tentativa,
+    atualizar_tentativa_feedback,
     update_questao,
 )
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 
 from app.flashcards_service import (
     generate_flashcards_from_documento_id,
+    generate_flashcards_from_multi_documento_ids,
     generate_flashcards_from_ocr_job,
     generate_flashcards_from_pdf_bytes,
     generate_flashcards_from_text,
@@ -120,6 +126,7 @@ from app.schemas import (
     FlashcardsEstatisticas,
     FlashcardsGerarResponse,
     FlashcardsGerarTextoRequest,
+    FlashcardsGerarMultiRequest,
     FlashcardUpdate,
     RevisaoIn,
     RevisaoResultado,
@@ -181,7 +188,7 @@ def api_build():
         import inspect
 
         src = inspect.getsource(gen.generate_from_text)
-        sample = "enviando ao Bedrock" if "enviando ao Bedrock" in src else "legacy"
+        sample = "sequencial" if "_generate_sequential" in src else "legacy"
     except Exception:
         sample = "unknown"
     return {
@@ -448,10 +455,14 @@ def traduzir(body: TraduzirRequest):
 
 @app.post("/gerar/texto", response_model=GerarResponse)
 def gerar_texto(body: GerarTextoRequest):
+    estilo = body.estilo
+    if body.incluir_caso_clinico is not None:
+        estilo = "clinico" if body.incluir_caso_clinico else "geral"
     try:
-        questoes, meta = generate_from_text(
+        questoes, meta = generate_from_text_persisted(
             body.texto,
             num_questoes_por_chunk=body.num_questoes_por_chunk,
+            num_questoes_total=body.num_questoes_total,
             tipos=list(body.tipos),
             dificuldade=body.dificuldade,
             max_chunks=body.max_chunks,
@@ -461,9 +472,10 @@ def gerar_texto(body: GerarTextoRequest):
             pagina_fim=body.pagina_fim,
             instrucoes_extras=body.instrucoes_extras,
             idioma=body.idioma,
-            estilo=body.estilo,
+            estilo=estilo,
             num_alternativas=body.num_alternativas,
             incluir_explicacao=body.incluir_explicacao,
+            incluir_caso_clinico=body.incluir_caso_clinico,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -477,6 +489,7 @@ def gerar_texto(body: GerarTextoRequest):
 async def gerar_pdf(
     arquivo: UploadFile = File(..., description="Arquivo PDF"),
     num_questoes_por_chunk: int = Form(default=2, ge=1, le=10),
+    num_questoes_total: Optional[int] = Form(default=None, ge=1, le=100),
     tipos: str = Form(default="multipla_escolha"),
     dificuldade: Optional[str] = Form(default=None),
     max_chunks: Optional[int] = Form(default=None, ge=1, le=50),
@@ -489,16 +502,20 @@ async def gerar_pdf(
     estilo: str = Form(default="clinico"),
     num_alternativas: int = Form(default=5, ge=2, le=6),
     incluir_explicacao: bool = Form(default=True),
+    incluir_caso_clinico: Optional[bool] = Form(default=None),
 ):
     data = await _read_pdf_upload(arquivo)
     tipo_list = _parse_tipos(tipos)
     keywords = _parse_keywords(palavras_chave)
+    if incluir_caso_clinico is not None:
+        estilo = "clinico" if incluir_caso_clinico else "geral"
 
     try:
         questoes, meta = generate_from_pdf_bytes(
             data,
             filename=arquivo.filename or "documento.pdf",
             num_questoes_por_chunk=num_questoes_por_chunk,
+            num_questoes_total=num_questoes_total,
             tipos=tipo_list,
             dificuldade=dificuldade,
             max_chunks=max_chunks,
@@ -511,6 +528,7 @@ async def gerar_pdf(
             estilo=estilo,
             num_alternativas=num_alternativas,
             incluir_explicacao=incluir_explicacao,
+            incluir_caso_clinico=incluir_caso_clinico,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -524,6 +542,7 @@ async def gerar_pdf(
 def gerar_de_ocr_job(
     job_id: str,
     num_questoes_por_chunk: int = 2,
+    num_questoes_total: Optional[int] = None,
     tipos: str = "multipla_escolha",
     dificuldade: Optional[str] = None,
     max_chunks: Optional[int] = None,
@@ -536,14 +555,18 @@ def gerar_de_ocr_job(
     estilo: str = "clinico",
     num_alternativas: int = 5,
     incluir_explicacao: bool = True,
+    incluir_caso_clinico: Optional[bool] = None,
 ):
     """Gera questões a partir do texto salvo por um job OCR concluído."""
     tipo_list = _parse_tipos(tipos)
     keywords = _parse_keywords(palavras_chave)
+    if incluir_caso_clinico is not None:
+        estilo = "clinico" if incluir_caso_clinico else "geral"
     try:
         questoes, meta = generate_from_ocr_job(
             job_id,
             num_questoes_por_chunk=num_questoes_por_chunk,
+            num_questoes_total=num_questoes_total,
             tipos=tipo_list,
             dificuldade=dificuldade,
             max_chunks=max_chunks,
@@ -556,6 +579,7 @@ def gerar_de_ocr_job(
             estilo=estilo,
             num_alternativas=num_alternativas,
             incluir_explicacao=incluir_explicacao,
+            incluir_caso_clinico=incluir_caso_clinico,
         )
     except KeyError:
         raise HTTPException(status_code=404, detail="Job OCR não encontrado") from None
@@ -564,6 +588,38 @@ def gerar_de_ocr_job(
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
+    return GerarResponse(questoes=questoes, meta=meta)
+
+
+@app.post("/gerar/multiplos-documentos", response_model=GerarResponse)
+def gerar_multiplos_documentos(body: GerarMultiDocumentosRequest):
+    """Combina vários PDFs do histórico e gera questões sobre o mesmo tema."""
+    tipo_list = body.tipos or ["multipla_escolha"]
+    keywords = body.palavras_chave
+    estilo = body.estilo
+    if body.incluir_caso_clinico is not None:
+        estilo = "clinico" if body.incluir_caso_clinico else "geral"
+    try:
+        questoes, meta = generate_from_multi_documento_ids(
+            body.documento_ids,
+            num_questoes_por_chunk=body.num_questoes_por_chunk,
+            num_questoes_total=body.num_questoes_total,
+            tipos=tipo_list,
+            dificuldade=body.dificuldade,
+            max_chunks=body.max_chunks,
+            tema=body.tema,
+            palavras_chave=keywords,
+            pagina_inicio=body.pagina_inicio,
+            pagina_fim=body.pagina_fim,
+            instrucoes_extras=body.instrucoes_extras,
+            idioma=body.idioma,
+            estilo=estilo,
+            num_alternativas=body.num_alternativas,
+            incluir_explicacao=body.incluir_explicacao,
+            incluir_caso_clinico=body.incluir_caso_clinico,
+        )
+    except Exception as e:
+        raise_http_for_exception(e)
     return GerarResponse(questoes=questoes, meta=meta)
 
 
@@ -616,6 +672,20 @@ def historico_documentos(limit: int = 50):
     if limit < 1 or limit > 200:
         raise HTTPException(status_code=400, detail="limit entre 1 e 200")
     return {"documentos": list_documentos(limit=limit)}
+
+
+@app.post("/historico/documentos/importar-pdf")
+async def historico_importar_pdf(
+    arquivo: UploadFile = File(..., description="PDF com texto selecionável"),
+):
+    """Registra o PDF no histórico (extração de texto) sem gerar questões ou flashcards."""
+    from app.document_text import ingest_pdf_to_historico
+
+    data = await _read_pdf_upload(arquivo)
+    try:
+        return ingest_pdf_to_historico(data, arquivo.filename or "documento.pdf")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.get("/historico/documentos/{documento_id}")
@@ -720,10 +790,24 @@ def banco_responder(questao_id: int, body: TentativaIn):
             resposta_usuario=body.resposta,
             tempo_resposta_ms=body.tempo_resposta_ms,
             comentario=body.comentario,
+            dificuldade_percebida=body.dificuldade_percebida,
         )
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     return TentativaResultado(**resultado)
+
+
+@app.patch("/banco/tentativas/{tentativa_id}")
+def banco_feedback_tentativa(tentativa_id: int, body: TentativaFeedbackIn):
+    """Atualiza feedback de dificuldade percebida em uma tentativa já registrada."""
+    try:
+        atualizar_tentativa_feedback(
+            tentativa_id,
+            dificuldade_percebida=body.dificuldade_percebida,
+        )
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    return {"ok": True}
 
 
 @app.get("/banco/estatisticas")
@@ -983,6 +1067,7 @@ def flashcards_gerar_texto(body: FlashcardsGerarTextoRequest):
             titulo=body.titulo,
             idioma=body.idioma,
             num_flashcards_por_chunk=body.num_flashcards_por_chunk,
+            num_flashcards_total=body.num_flashcards_total,
             max_chunks=body.max_chunks,
             tema=body.tema,
             palavras_chave=body.palavras_chave,
@@ -1001,6 +1086,7 @@ def flashcards_gerar_texto(body: FlashcardsGerarTextoRequest):
 async def flashcards_gerar_pdf(
     arquivo: UploadFile = File(..., description="Arquivo PDF com texto selecionável"),
     num_flashcards_por_chunk: int = Form(default=5, ge=1, le=20),
+    num_flashcards_total: Optional[int] = Form(default=None, ge=1, le=200),
     max_chunks: Optional[int] = Form(default=None, ge=1, le=50),
     tema: Optional[str] = Form(default=None),
     palavras_chave: Optional[str] = Form(default=None, description="Lista separada por vírgula"),
@@ -1019,6 +1105,7 @@ async def flashcards_gerar_pdf(
             titulo=titulo,
             idioma=idioma,
             num_flashcards_por_chunk=num_flashcards_por_chunk,
+            num_flashcards_total=num_flashcards_total,
             max_chunks=max_chunks,
             tema=tema,
             palavras_chave=keywords,
@@ -1037,6 +1124,7 @@ async def flashcards_gerar_pdf(
 def flashcards_gerar_ocr_job(
     job_id: str,
     num_flashcards_por_chunk: int = 5,
+    num_flashcards_total: Optional[int] = None,
     max_chunks: Optional[int] = None,
     tema: Optional[str] = None,
     palavras_chave: Optional[str] = None,
@@ -1054,6 +1142,7 @@ def flashcards_gerar_ocr_job(
             titulo=titulo,
             idioma=idioma,
             num_flashcards_por_chunk=num_flashcards_por_chunk,
+            num_flashcards_total=num_flashcards_total,
             max_chunks=max_chunks,
             tema=tema,
             palavras_chave=keywords,
@@ -1074,6 +1163,7 @@ def flashcards_gerar_ocr_job(
 def flashcards_gerar_documento(
     documento_id: int,
     num_flashcards_por_chunk: int = 5,
+    num_flashcards_total: Optional[int] = None,
     max_chunks: Optional[int] = None,
     tema: Optional[str] = None,
     palavras_chave: Optional[str] = None,
@@ -1091,12 +1181,36 @@ def flashcards_gerar_documento(
             titulo=titulo,
             idioma=idioma,
             num_flashcards_por_chunk=num_flashcards_por_chunk,
+            num_flashcards_total=num_flashcards_total,
             max_chunks=max_chunks,
             tema=tema,
             palavras_chave=keywords,
             pagina_inicio=pagina_inicio,
             pagina_fim=pagina_fim,
             instrucoes_extras=instrucoes_extras,
+        )
+    except Exception as e:
+        raise_http_for_exception(e)
+    return FlashcardsGerarResponse(deck=DeckOut(**result["deck"]), meta=result["meta"])
+
+
+@app.post("/flashcards/gerar/multiplos-documentos", response_model=FlashcardsGerarResponse)
+def flashcards_gerar_multiplos(body: FlashcardsGerarMultiRequest):
+    """Combina vários documentos do histórico para gerar flashcards do mesmo tema."""
+    keywords = body.palavras_chave
+    try:
+        result = generate_flashcards_from_multi_documento_ids(
+            body.documento_ids,
+            titulo=body.titulo,
+            idioma=body.idioma,
+            num_flashcards_por_chunk=body.num_flashcards_por_chunk,
+            num_flashcards_total=body.num_flashcards_total,
+            max_chunks=body.max_chunks,
+            tema=body.tema,
+            palavras_chave=keywords,
+            pagina_inicio=body.pagina_inicio,
+            pagina_fim=body.pagina_fim,
+            instrucoes_extras=body.instrucoes_extras,
         )
     except Exception as e:
         raise_http_for_exception(e)
@@ -1213,6 +1327,7 @@ def flashcards_revisar(card_id: int, body: RevisaoIn):
             flashcard_id=card_id,
             nota=body.nota,
             tempo_resposta_ms=body.tempo_resposta_ms,
+            comentario=body.comentario,
         )
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e

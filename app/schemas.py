@@ -80,6 +80,9 @@ class TraduzirResponse(BaseModel):
 class GerarTextoRequest(BaseModel):
     texto: str = Field(..., min_length=50, description="Conteúdo base para as questões")
     num_questoes_por_chunk: int = Field(default=2, ge=1, le=10)
+    num_questoes_total: Optional[int] = Field(
+        default=None, ge=1, le=100, description="Quantidade total desejada de questões"
+    )
     tipos: List[TipoQuestao] = Field(default=["multipla_escolha"])
     dificuldade: Optional[Dificuldade] = None
     max_chunks: Optional[int] = Field(default=None, ge=1, le=50)
@@ -92,20 +95,48 @@ class GerarTextoRequest(BaseModel):
     pagina_fim: Optional[int] = Field(default=None, ge=1)
     instrucoes_extras: Optional[str] = Field(default=None, max_length=500)
 
-    idioma: Idioma = Field(default="pt", description="pt | en | it")
+    idioma: Idioma = Field(default="it", description="pt | en | it")
     estilo: EstiloQuestao = Field(
         default="clinico",
         description="Formato pedagógico (caso clínico, conduta, diagnóstico, etc.).",
     )
     num_alternativas: int = Field(
         default=5,
-        ge=2,
-        le=6,
-        description="Quantidade de alternativas em múltipla escolha (4 = A–D, 5 = A–E).",
+        ge=5,
+        le=5,
+        description="Quantidade de alternativas em múltipla escolha (fixo: 5 = A–E).",
     )
     incluir_explicacao: bool = Field(
         default=True, description="Pedir resposta comentada para cada questão."
     )
+    incluir_caso_clinico: Optional[bool] = Field(
+        default=None,
+        description="Se true, gera vignette clínica; se false, questão direta.",
+    )
+
+
+class GerarMultiDocumentosRequest(BaseModel):
+    documento_ids: List[int] = Field(
+        ...,
+        min_length=1,
+        max_length=20,
+        description="IDs de documentos do histórico a combinar na geração.",
+    )
+    num_questoes_por_chunk: int = Field(default=2, ge=1, le=10)
+    num_questoes_total: Optional[int] = Field(default=None, ge=1, le=100)
+    tipos: List[TipoQuestao] = Field(default=["multipla_escolha"])
+    dificuldade: Optional[Dificuldade] = None
+    max_chunks: Optional[int] = Field(default=None, ge=1, le=50)
+    tema: Optional[str] = Field(default=None, max_length=200)
+    palavras_chave: Optional[List[str]] = Field(default=None)
+    pagina_inicio: Optional[int] = Field(default=None, ge=1)
+    pagina_fim: Optional[int] = Field(default=None, ge=1)
+    instrucoes_extras: Optional[str] = Field(default=None, max_length=500)
+    idioma: Idioma = Field(default="it")
+    estilo: EstiloQuestao = Field(default="clinico")
+    num_alternativas: int = Field(default=5, ge=5, le=5)
+    incluir_explicacao: bool = Field(default=True)
+    incluir_caso_clinico: Optional[bool] = Field(default=None)
 
 
 class GerarResponse(BaseModel):
@@ -171,6 +202,16 @@ class TentativaIn(BaseModel):
     resposta: str = Field(..., min_length=1, description="Letra (A–F) ou texto da resposta")
     tempo_resposta_ms: Optional[int] = Field(default=None, ge=0)
     comentario: Optional[str] = Field(default=None, max_length=2000)
+    dificuldade_percebida: Optional[Dificuldade] = Field(
+        default=None,
+        description="Feedback do aluno: facil | media | dificil",
+    )
+
+
+class TentativaFeedbackIn(BaseModel):
+    dificuldade_percebida: Dificuldade = Field(
+        ..., description="Feedback do aluno: facil | media | dificil"
+    )
 
 
 class TentativaResultado(BaseModel):
@@ -457,11 +498,15 @@ class Flashcard(BaseModel):
     ultima_revisao_em: Optional[str] = None
     lapsos: Optional[int] = None
     total_revisoes: Optional[int] = None
+    imagem_url: Optional[str] = Field(
+        default=None, description="URL ou caminho de imagem ilustrativa do card."
+    )
 
 
 class FlashcardsGerarTextoRequest(BaseModel):
     texto: str = Field(..., min_length=50, description="Conteúdo base para os flashcards")
     num_flashcards_por_chunk: int = Field(default=5, ge=1, le=20)
+    num_flashcards_total: Optional[int] = Field(default=None, ge=1, le=200)
     max_chunks: Optional[int] = Field(default=None, ge=1, le=50)
     tema: Optional[str] = Field(default=None, description="Foco temático dos cards")
     palavras_chave: Optional[List[str]] = Field(
@@ -470,7 +515,26 @@ class FlashcardsGerarTextoRequest(BaseModel):
     pagina_inicio: Optional[int] = Field(default=None, ge=1)
     pagina_fim: Optional[int] = Field(default=None, ge=1)
     instrucoes_extras: Optional[str] = Field(default=None, max_length=500)
-    idioma: Idioma = Field(default="pt", description="pt | en | it")
+    idioma: Idioma = Field(default="it", description="pt | en | it")
+    titulo: Optional[str] = Field(default=None, max_length=200, description="Título do deck")
+
+
+class FlashcardsGerarMultiRequest(BaseModel):
+    documento_ids: List[int] = Field(
+        ...,
+        min_length=1,
+        max_length=20,
+        description="IDs de documentos do histórico a combinar.",
+    )
+    num_flashcards_por_chunk: int = Field(default=5, ge=1, le=20)
+    num_flashcards_total: Optional[int] = Field(default=None, ge=1, le=200)
+    max_chunks: Optional[int] = Field(default=None, ge=1, le=50)
+    tema: Optional[str] = Field(default=None, description="Foco temático dos cards")
+    palavras_chave: Optional[List[str]] = Field(default=None)
+    pagina_inicio: Optional[int] = Field(default=None, ge=1)
+    pagina_fim: Optional[int] = Field(default=None, ge=1)
+    instrucoes_extras: Optional[str] = Field(default=None, max_length=500)
+    idioma: Idioma = Field(default="it", description="pt | en | it")
     titulo: Optional[str] = Field(default=None, max_length=200, description="Título do deck")
 
 
@@ -501,6 +565,7 @@ class FlashcardUpdate(BaseModel):
     tags: Optional[List[str]] = None
     dificuldade: Optional[Dificuldade] = None
     referencia: Optional[str] = None
+    imagem_url: Optional[str] = Field(default=None, max_length=2000)
 
 
 class FlashcardOut(Flashcard):
@@ -544,6 +609,11 @@ class RevisaoIn(BaseModel):
         ..., description="0=Errei, 1=Difícil, 2=Bom, 3=Fácil (auto-avaliação)"
     )
     tempo_resposta_ms: Optional[int] = Field(default=None, ge=0)
+    comentario: Optional[str] = Field(
+        default=None,
+        max_length=1000,
+        description="Feedback opcional para melhorar os cards (ex.: card confuso, impreciso).",
+    )
 
 
 class RevisaoResultado(BaseModel):
@@ -593,6 +663,8 @@ class DeckProgressoOut(BaseModel):
     cards_revisados: int = 0
     cards_dominados: int = 0
     total_revisoes: int = 0
+    cards_com_erro: int = 0
+    total_erros: int = 0
     cards: List[FlashcardProgresso] = Field(default_factory=list)
 
 
@@ -603,6 +675,7 @@ class RevisaoHistoricoItem(BaseModel):
     intervalo_novo: Optional[int] = None
     ease_factor: Optional[float] = None
     tempo_resposta_ms: Optional[int] = None
+    comentario: Optional[str] = None
     criado_em: Optional[str] = None
 
 

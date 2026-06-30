@@ -84,6 +84,61 @@ ESTILO_DESC_PT = {
 }
 
 
+def _quer_vinheta_clinica(estilo: str, incluir_caso_clinico: bool | None) -> bool:
+    if incluir_caso_clinico is not None:
+        return incluir_caso_clinico
+    return estilo in (
+        "clinico",
+        "diagnostico",
+        "conduta",
+        "cirurgia",
+        "pediatria",
+        "obstetricia",
+        "emergencia",
+    )
+
+
+def _linha_formato_enunciado(idioma: str, com_vinheta: bool) -> str:
+    if com_vinheta:
+        if idioma == "it":
+            return (
+                "FORMATO ENUNCIADO (OBBLIGATORIO):\n"
+                "- Il campo JSON \"enunciado\" deve contenere PRIMA la vignetta clinica completa "
+                "(eta, sesso, anamnesi, esame obiettivo ed eventuali esami complementari coerenti col testo).\n"
+                "- Dopo la vignetta, inserisci la domanda finale (es. diagnosi, condotta, terapia).\n"
+                "- NON usare domande teoriche secche senza presentare un paziente/caso.\n"
+                "- Non creare campi JSON separati per il caso: tutto va in \"enunciado\".\n"
+            )
+        if idioma == "en":
+            return (
+                "STATEMENT FORMAT (MANDATORY):\n"
+                "- The JSON field \"enunciado\" must FIRST contain the full clinical vignette "
+                "(age, sex, history, physical exam and relevant tests grounded in the source text).\n"
+                "- After the vignette, add the final question.\n"
+                "- Do NOT ask bare theoretical questions without a clinical case.\n"
+                "- Do not use separate JSON fields for the case — everything goes in \"enunciado\".\n"
+            )
+        return (
+            "FORMATO DO ENUNCIADO (OBRIGATÓRIO):\n"
+            "- O campo JSON \"enunciado\" deve conter PRIMEIRO a vinheta clínica completa "
+            "(idade, sexo, queixa, história, exame físico e/ou exames complementares coerentes com o texto).\n"
+            "- Depois da vinheta, inclua a pergunta final (diagnóstico, conduta, tratamento etc.).\n"
+            "- NÃO faça perguntas teóricas secas sem apresentar um caso clínico.\n"
+            "- Não use campos JSON separados para o caso — tudo vai em \"enunciado\".\n"
+        )
+    if idioma == "it":
+        return (
+            "FORMATO ENUNCIADO: domanda diretta sul contenuto, SENZA vignetta di paziente immaginario.\n"
+        )
+    if idioma == "en":
+        return (
+            "STATEMENT FORMAT: direct question about the content, WITHOUT a fictional patient vignette.\n"
+        )
+    return (
+        "FORMATO DO ENUNCIADO: pergunta direta sobre o conteúdo, SEM vinheta de paciente fictício.\n"
+    )
+
+
 def _estilo_traduzido(estilo: str, idioma: str) -> str:
     base = ESTILO_DESC_PT.get(estilo, ESTILO_DESC_PT["geral"])
     if idioma == "pt":
@@ -106,12 +161,14 @@ def _build_system_prompt(idioma: str, num_alternativas: int, incluir_explicacao:
     letras = ", ".join(LETRAS[:num_alternativas])
     idioma_nome = IDIOMA_NOMES.get(idioma, IDIOMA_NOMES["pt"])
     expl_rule = (
-        "Para CADA questão de múltipla escolha inclua: \n"
-        "  - \"explicacao\": parágrafo objetivo dizendo POR QUE o gabarito é a alternativa correta, citando o conteúdo do texto.\n"
+        "Para CADA questão de múltipla escolha inclua OBRIGATORIAMENTE: \n"
+        "  - \"explicacao\": explicação DETALHADA (3–6 frases) dizendo POR QUE o gabarito é correto, "
+        "com raciocínio clínico passo a passo baseado no texto.\n"
         "  - \"explicacoes_alternativas\": objeto com chaves "
         + letras
-        + " explicando POR QUE cada distratora está errada (a chave do gabarito também recebe um reforço breve).\n"
-        "  - \"referencia\": citação curta (até 240 caracteres) do trecho do texto que sustenta a resposta."
+        + " explicando POR QUE cada distratora está errada (mínimo 1 frase por letra).\n"
+        "  - \"referencia\": citação LITERAL ou quase literal (até 400 caracteres) do trecho do texto-fonte "
+        "que sustenta a resposta — copie o trecho relevante do material fornecido."
     ) if incluir_explicacao else "Campos de explicação não são obrigatórios."
 
     return f"""Você é um banco de questões médico de alto nível (estilo Revalida / Residência / USMLE).
@@ -151,6 +208,7 @@ def _build_user_prompt(
     estilo: str,
     num_alternativas: int,
     incluir_explicacao: bool,
+    incluir_caso_clinico: bool | None = None,
 ) -> str:
     tipos_str = ", ".join(tipos)
     diff_line = f"Dificuldade preferida: {dificuldade}.\n" if dificuldade else ""
@@ -173,6 +231,9 @@ def _build_user_prompt(
         extras_line = f"Instruções adicionais: {instrucoes_extras.strip()}\n"
 
     estilo_line = f"ESTILO PEDAGÓGICO: {_estilo_traduzido(estilo, idioma)}\n"
+    enunciado_line = _linha_formato_enunciado(
+        idioma, _quer_vinheta_clinica(estilo, incluir_caso_clinico)
+    )
 
     letras = LETRAS[:num_alternativas]
     letras_str = ", ".join(letras)
@@ -186,7 +247,27 @@ def _build_user_prompt(
       "explicacoes_alternativas": {expl_alts_example},
       "referencia": "..." """
 
-    return f"""{diff_line}{page_info}{tema_line}{extras_line}{estilo_line}chunk_id para fonte: {chunk_id}.
+    com_vinheta = _quer_vinheta_clinica(estilo, incluir_caso_clinico)
+    if com_vinheta:
+        if idioma == "it":
+            enun_example = (
+                '"Un paziente di 62 anni, maschio, si presenta con dispnea progressiva da 3 giorni... '
+                '[vignetta completa]. Quale diagnosi è più probabile?"'
+            )
+        elif idioma == "en":
+            enun_example = (
+                '"A 62-year-old man presents with progressive dyspnea for 3 days... '
+                '[full vignette]. What is the most likely diagnosis?"'
+            )
+        else:
+            enun_example = (
+                '"Paciente de 62 anos, sexo masculino, apresenta dispneia progressiva há 3 dias... '
+                '[vinheta completa]. Qual o diagnóstico mais provável?"'
+            )
+    else:
+        enun_example = '"Pergunta direta sobre o conteúdo do texto, sem vinheta de paciente."'
+
+    return f"""{diff_line}{page_info}{tema_line}{extras_line}{estilo_line}{enunciado_line}chunk_id para fonte: {chunk_id}.
 Gere até {num_questions} questão(ões) dos tipos: {tipos_str}.
 Cada múltipla escolha deve ter {num_alternativas} alternativas ({letras_str}).
 
@@ -195,7 +276,7 @@ Formato JSON obrigatório (sem markdown):
   "questoes": [
     {{
       "tipo": "multipla_escolha",
-      "enunciado": "...",
+      "enunciado": {enun_example},
       "alternativas": {alts_example},
       "gabarito": "{letras[0]}",
       "dificuldade": "facil|media|dificil",
@@ -267,6 +348,8 @@ def invoke_bedrock(
     estilo: str = "clinico",
     num_alternativas: int = 5,
     incluir_explicacao: bool = True,
+    incluir_caso_clinico: bool | None = None,
+    temperature: float = 0.3,
 ) -> dict:
     tipos = tipos or ["multipla_escolha"]
     for t in tipos:
@@ -294,11 +377,16 @@ def invoke_bedrock(
         estilo,
         num_alternativas,
         incluir_explicacao,
+        incluir_caso_clinico,
     )
     system_prompt = _build_system_prompt(idioma, num_alternativas, incluir_explicacao)
     model_id = effective_bedrock_model_id()
 
-    max_tokens = 4500 if incluir_explicacao else 2500
+    n = max(1, num_questions)
+    if incluir_explicacao:
+        max_tokens = min(16000, 1400 * n + 800)
+    else:
+        max_tokens = min(8000, 480 * n + 400)
     _blog(
         f"converse -> modelo={model_id} chunk_id={chunk_id} "
         f"chars_in={len(user_prompt) + len(system_prompt)} max_tokens={max_tokens}"
@@ -316,7 +404,7 @@ def invoke_bedrock(
             ],
             inferenceConfig={
                 "maxTokens": max_tokens,
-                "temperature": 0.3,
+                "temperature": temperature,
             },
         )
     except ReadTimeoutError as e:
@@ -485,6 +573,7 @@ def gerar_flashcards(
     tema: str | None = None,
     instrucoes_extras: str | None = None,
     idioma: str = "pt",
+    exatamente: bool = False,
 ) -> dict:
     """Gera flashcards (frente/verso) a partir de um trecho do material via Bedrock.
 
@@ -492,17 +581,17 @@ def gerar_flashcards(
     """
     idioma_nome = IDIOMA_NOMES.get(idioma, IDIOMA_NOMES["pt"])
 
-    system = f"""Você cria FLASHCARDS de estudo de alto nível (estilo NotebookLM / Anki) para medicina (Revalida, Residência, USMLE).
-Gere os cards EXCLUSIVAMENTE com base no TEXTO fornecido — não invente fatos, dosagens ou condutas fora do texto.
-Idioma OBRIGATÓRIO de frente, verso e dica: {idioma_nome}.
+    system = f"""Você cria FLASHCARDS de estudo objetivos para memorização (estilo Anki) em medicina.
+Gere os cards EXCLUSIVAMENTE com base no TEXTO fornecido — não invente fatos fora do texto.
+Idioma OBRIGATÓRIO de frente e verso: {idioma_nome}.
 Responda APENAS com JSON válido (sem markdown, sem comentários, sem texto fora do JSON).
 
-Princípios de um bom flashcard:
-- FRENTE: uma única pergunta/conceito objetivo (evite "liste tudo sobre..."). Prefira recall ativo.
-- VERSO: resposta curta, precisa e suficiente (1–4 frases ou bullets curtos).
-- Evite cards duplicados ou triviais; cubra os pontos mais cobráveis do trecho.
-- "dica": opcional, uma pista curta que ajude a lembrar sem entregar a resposta.
-- "referencia": citação curta (até 240 caracteres) do trecho que fundamenta o verso."""
+Princípios:
+- FRENTE: pergunta direta, uma ideia por card (máx. 2 frases).
+- VERSO: resposta curta e memorável (1–3 frases ou lista curta).
+- Foco em recall ativo; evite parágrafos longos e cards triviais.
+- NÃO inclua dicas mnemônicas nem citações de trecho no verso.
+- Use "dica": null e "referencia": null sempre."""
 
     diff_line = ""
     tema_line = ""
@@ -521,8 +610,13 @@ Princípios de um bom flashcard:
             page_info += f"–{page_end}"
         page_info += ".\n"
 
+    qtd_line = (
+        f"Gere EXATAMENTE {num_flashcards} flashcard(s) distintos"
+        if exatamente
+        else f"Gere até {num_flashcards} flashcard(s)"
+    )
     user = f"""{diff_line}{page_info}{tema_line}{extras_line}chunk_id para fonte: {chunk_id}.
-Gere até {num_flashcards} flashcard(s) de alta qualidade a partir do TEXTO.
+{qtd_line} de alta qualidade a partir do TEXTO.
 
 Formato JSON obrigatório (sem markdown):
 {{
@@ -530,10 +624,10 @@ Formato JSON obrigatório (sem markdown):
     {{
       "frente": "...",
       "verso": "...",
-      "dica": "... (ou null)",
+      "dica": null,
       "tags": ["...", "..."],
       "dificuldade": "facil|media|dificil",
-      "referencia": "...",
+      "referencia": null,
       "fonte": {{ "chunk_id": {chunk_id}, "pagina_inicio": {page_start or "null"}, "pagina_fim": {page_end or "null"} }}
     }}
   ]
