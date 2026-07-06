@@ -77,6 +77,40 @@ class TraduzirResponse(BaseModel):
     itens: List[TraduzirItemOut]
 
 
+class SimuladoMateriaContexto(BaseModel):
+    banco_id: str
+    banco_nome: str
+    total: int = 0
+
+
+class SimuladoCategoriaContexto(BaseModel):
+    banco_id: str
+    banco_nome: str
+    categoria: str
+    total: int = 0
+
+
+class SimuladoPlanejarRequest(BaseModel):
+    prompt: str = Field(..., min_length=5, max_length=2000)
+    materias: List[SimuladoMateriaContexto] = Field(default_factory=list)
+    categorias: List[SimuladoCategoriaContexto] = Field(default_factory=list)
+
+
+class SimuladoAreaPlanejada(BaseModel):
+    banco_id: Optional[str] = None
+    banco_nome: Optional[str] = None
+    categoria: Optional[str] = None
+    quantidade: int = Field(..., ge=1, le=100)
+    busca: Optional[str] = None
+
+
+class SimuladoPlanejarResponse(BaseModel):
+    titulo_sugerido: str
+    tempo_minutos: int = Field(..., ge=15, le=600)
+    resumo: str = ""
+    areas: List[SimuladoAreaPlanejada] = Field(default_factory=list)
+
+
 class GerarTextoRequest(BaseModel):
     texto: str = Field(..., min_length=50, description="Conteúdo base para as questões")
     num_questoes_por_chunk: int = Field(default=2, ge=1, le=10)
@@ -243,7 +277,13 @@ StatusAtividadeSala = Literal["pendente", "concluida", "ignorada"]
 
 
 class TrilhaGerarRequest(BaseModel):
-    documento_id: int = Field(..., ge=1, description="Documento no histórico (vincula a trilha)")
+    documento_id: Optional[int] = Field(
+        default=None, ge=1, description="Documento único no histórico (vincula a trilha)"
+    )
+    documento_ids: Optional[List[int]] = Field(
+        default=None,
+        description="Vários documentos/PDFs — mescla textos antes de gerar a trilha (2–20)",
+    )
     ocr_job_id: Optional[str] = Field(
         default=None,
         description="Job OCR concluído (status succeeded). Usa se o documento não tiver ocr_job_id salvo.",

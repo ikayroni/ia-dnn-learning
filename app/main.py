@@ -45,6 +45,8 @@ from app.schemas import (
     TemasResponse,
     TraduzirRequest,
     TraduzirResponse,
+    SimuladoPlanejarRequest,
+    SimuladoPlanejarResponse,
     QuestaoUpdate,
     TentativaIn,
     TentativaFeedbackIn,
@@ -63,6 +65,7 @@ from app.trilha_service import (
     avancar_etapa_trilha,
     gerar_sala,
     gerar_trilha,
+    gerar_trilha_multiplos,
     obter_sala_hoje,
 )
 from app.trilha_storage import (
@@ -229,6 +232,10 @@ MAX_BYTES = settings.max_pdf_upload_mb * 1024 * 1024
 STATIC_DIR = BASE_DIR / "static"
 if STATIC_DIR.is_dir():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+UPLOADS_DIR = BASE_DIR / "data" / "uploads"
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 
 @app.get("/")
@@ -451,6 +458,34 @@ def traduzir(body: TraduzirRequest):
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     return TraduzirResponse(idioma=body.idioma, itens=result.get("itens", []))
+
+
+@app.post("/simulados/planejar", response_model=SimuladoPlanejarResponse)
+def planejar_simulado_route(body: SimuladoPlanejarRequest):
+    """Interpreta pedido em linguagem natural e devolve plano de montagem de simulado."""
+    from app.bedrock import planejar_simulado
+
+    try:
+        data = planejar_simulado(
+            body.prompt,
+            [m.model_dump() for m in body.materias],
+            [c.model_dump() for c in body.categorias],
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+
+    areas = data.get("areas", [])
+    if not isinstance(areas, list) or not areas:
+        raise HTTPException(status_code=502, detail="Plano inválido retornado pela IA")
+
+    return SimuladoPlanejarResponse(
+        titulo_sugerido=str(data.get("titulo_sugerido") or "Simulado personalizado"),
+        tempo_minutos=int(data.get("tempo_minutos") or 120),
+        resumo=str(data.get("resumo") or ""),
+        areas=areas,
+    )
 
 
 @app.post("/gerar/texto", response_model=GerarResponse)
@@ -825,19 +860,36 @@ def trilha_gerar(body: TrilhaGerarRequest):
     Gera trilha completa com IA (temas + plano diário) a partir de um documento OCR.
 
     Aceita documento com OCR, cache de PDF nativo, job OCR (`ocr_job_id`) ou `texto` colado no body.
+    Com `documento_ids` (2+), mescla vários PDFs antes de gerar.
     """
     try:
-        trilha = gerar_trilha(
-            documento_id=body.documento_id,
-            objetivo=body.objetivo,
-            semanas=body.semanas,
-            horas_por_dia=body.horas_por_dia,
-            dias_por_semana=body.dias_por_semana,
-            max_temas=body.max_temas,
-            instrucoes_extras=body.instrucoes_extras,
-            ocr_job_id=body.ocr_job_id,
-            texto=body.texto,
-        )
+        if body.documento_ids and len(body.documento_ids) >= 2:
+            trilha = gerar_trilha_multiplos(
+                documento_ids=body.documento_ids,
+                objetivo=body.objetivo,
+                semanas=body.semanas,
+                horas_por_dia=body.horas_por_dia,
+                dias_por_semana=body.dias_por_semana,
+                max_temas=body.max_temas,
+                instrucoes_extras=body.instrucoes_extras,
+            )
+        elif body.documento_id:
+            trilha = gerar_trilha(
+                documento_id=body.documento_id,
+                objetivo=body.objetivo,
+                semanas=body.semanas,
+                horas_por_dia=body.horas_por_dia,
+                dias_por_semana=body.dias_por_semana,
+                max_temas=body.max_temas,
+                instrucoes_extras=body.instrucoes_extras,
+                ocr_job_id=body.ocr_job_id,
+                texto=body.texto,
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Informe documento_id ou documento_ids (2 ou mais)",
+            )
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
@@ -1306,6 +1358,124 @@ def flashcards_excluir_card(card_id: int):
     if not delete_card(card_id):
         raise HTTPException(status_code=404, detail="Flashcard não encontrado")
     return {"deleted": True, "flashcard_id": card_id}
+
+
+@app.post("/flashcards/import/preview")
+async def flashcards_import_preview(arquivo: UploadFile = File(...)):
+    """Pré-visualiza importação CSV/TXT sem gravar no banco."""
+    from app.flashcards_import import decode_import_file, parse_flashcards_with_report
+
+    raw = await arquivo.read()
+    text = decode_import_file(raw)
+    try:
+        relatorio = parse_flashcards_with_report(text, arquivo.filename or "")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    return {
+        "formato": relatorio["formato"],
+        "total_linhas": relatorio["total_linhas"],
+        "validos": relatorio["validos"],
+        "invalidos": relatorio["invalidos"],
+        "amostra_validos": relatorio["amostra_validos"],
+        "rejeitados": relatorio["rejeitados"],
+        "arquivo": arquivo.filename,
+    }
+
+
+@app.post("/flashcards/import/csv")
+async def flashcards_importar_csv(
+    arquivo: UploadFile = File(...),
+    titulo: str = Form(default="Importação CSV"),
+    deck_id: Optional[int] = Form(default=None),
+    idioma: str = Form(default="it"),
+):
+    """Importa flashcards em lote de CSV/TSV ou TXT (pergunta|resposta)."""
+    from app.flashcards_import import decode_import_file, parse_flashcards_with_report
+
+    raw = await arquivo.read()
+    text = decode_import_file(raw)
+    try:
+        relatorio = parse_flashcards_with_report(text, arquivo.filename or "")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    cards = relatorio["cards"]
+    fonte = "import_txt" if relatorio["formato"] == "pipe" else "import_csv"
+
+    if deck_id:
+        try:
+            add_cards(deck_id, cards)
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        deck = get_deck(deck_id)
+        return {
+            "deck": deck,
+            "importados": len(cards),
+            "modo": "adicionar",
+            "relatorio": {
+                "formato": relatorio["formato"],
+                "total_linhas": relatorio["total_linhas"],
+                "validos": relatorio["validos"],
+                "invalidos": relatorio["invalidos"],
+                "rejeitados": relatorio["rejeitados"],
+            },
+        }
+
+    new_id = save_deck(
+        titulo=titulo.strip() or "Importação",
+        cards=cards,
+        idioma=idioma,
+        fonte=fonte,
+        meta={
+            "importados": len(cards),
+            "arquivo": arquivo.filename,
+            "formato": relatorio["formato"],
+        },
+    )
+    deck = get_deck(new_id)
+    return {
+        "deck": deck,
+        "importados": len(cards),
+        "modo": "novo",
+        "relatorio": {
+            "formato": relatorio["formato"],
+            "total_linhas": relatorio["total_linhas"],
+            "validos": relatorio["validos"],
+            "invalidos": relatorio["invalidos"],
+            "rejeitados": relatorio["rejeitados"],
+        },
+    }
+
+
+@app.post("/flashcards/cards/{card_id}/imagem")
+async def flashcards_upload_imagem(card_id: int, arquivo: UploadFile = File(...)):
+    """Anexa imagem ao card (upload de arquivo)."""
+    import uuid
+
+    if not arquivo.filename:
+        raise HTTPException(status_code=400, detail="Arquivo inválido")
+    ext = arquivo.filename.rsplit(".", 1)[-1].lower()
+    if ext not in ("jpg", "jpeg", "png", "gif", "webp"):
+        raise HTTPException(status_code=400, detail="Formato não suportado. Use JPG, PNG, GIF ou WebP.")
+    data = await arquivo.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Imagem maior que 5 MB")
+
+    dest_dir = UPLOADS_DIR / "flashcards"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    fname = f"{card_id}_{uuid.uuid4().hex[:10]}.{ext}"
+    path = dest_dir / fname
+    path.write_bytes(data)
+
+    imagem_url = f"/uploads/flashcards/{fname}"
+    card = update_card(card_id, {"imagem_url": imagem_url})
+    if not card:
+        path.unlink(missing_ok=True)
+        raise HTTPException(status_code=404, detail="Flashcard não encontrado")
+    return card
 
 
 @app.get("/flashcards/estudo", response_model=EstudoResponse)

@@ -587,9 +587,10 @@ Idioma OBRIGATÓRIO de frente e verso: {idioma_nome}.
 Responda APENAS com JSON válido (sem markdown, sem comentários, sem texto fora do JSON).
 
 Princípios:
-- FRENTE: pergunta direta, uma ideia por card (máx. 2 frases).
-- VERSO: resposta curta e memorável (1–3 frases ou lista curta).
-- Foco em recall ativo; evite parágrafos longos e cards triviais.
+- FRENTE: pergunta direta, UMA ideia por card (máx. 1 frase curta, até ~15 palavras).
+- VERSO: resposta objetiva e memorável (máx. 2 frases curtas ou lista de até 4 itens).
+- Foco em recall ativo; evite parágrafos longos, repetições e cards triviais.
+- Prefira termos-chave e definições diretas em vez de explicações longas.
 - NÃO inclua dicas mnemônicas nem citações de trecho no verso.
 - Use "dica": null e "referencia": null sempre."""
 
@@ -774,4 +775,59 @@ Formato JSON:
     atividades = data.get("atividades", [])
     if not isinstance(atividades, list) or not atividades:
         raise ValueError("LLM não retornou atividades válidas para a sala.")
+    return data
+
+
+def planejar_simulado(
+    prompt: str,
+    materias: list[dict],
+    categorias: list[dict],
+) -> dict:
+    """Interpreta pedido em linguagem natural e devolve plano de montagem de simulado."""
+    mat_lines = "\n".join(
+        f"- {m.get('banco_nome', '?')} (id: {m.get('banco_id', '')}, {m.get('total', 0)} questões)"
+        for m in materias[:40]
+    )
+    cat_lines = "\n".join(
+        f"- {c.get('banco_nome', '?')} / {c.get('categoria', '?')} ({c.get('total', 0)} questões)"
+        for c in categorias[:80]
+    )
+
+    system = """Você monta planos de simulados médicos para o Revalida (DNN).
+O usuário descreve o simulado desejado; você devolve um JSON com áreas, quantidades e filtros.
+Use APENAS matérias e categorias EXATAS do catálogo fornecido (copie o nome da categoria como está).
+Para foco temático (ex.: cardiologia, diabetes): use OU "categoria" OU "busca", nunca os dois juntos.
+Prefira "categoria" quando existir no catálogo com questões suficientes; use "busca" só se não houver categoria adequada.
+As questões do banco podem estar em italiano — termos de busca em português podem achar poucas questões.
+Distribua quantidades de forma coerente com o pedido. Total típico: 10–100 questões."""
+
+    user = f"""Pedido do usuário:
+{prompt}
+
+Matérias disponíveis:
+{mat_lines or '(nenhuma)'}
+
+Categorias (matéria / categoria):
+{cat_lines or '(nenhuma)'}
+
+Responda SOMENTE JSON válido:
+{{
+  "titulo_sugerido": "nome curto do simulado",
+  "tempo_minutos": 120,
+  "resumo": "1–2 frases explicando o plano",
+  "areas": [
+    {{
+      "banco_id": "uuid-da-materia ou null",
+      "banco_nome": "nome exato da matéria",
+      "categoria": "categoria ou null",
+      "quantidade": 10,
+      "busca": "termo opcional ou null"
+    }}
+  ]
+}}"""
+
+    data = _converse_json(system, user, max_tokens=2000, temperature=0.25)
+    areas = data.get("areas", [])
+    if not isinstance(areas, list) or not areas:
+        raise ValueError("Plano inválido: nenhuma área retornada.")
     return data

@@ -127,6 +127,46 @@ def gerar_trilha(
     return trilha
 
 
+def gerar_trilha_multiplos(
+    *,
+    documento_ids: list[int],
+    objetivo: str = "Revalida / Residência Médica",
+    semanas: int = 2,
+    horas_por_dia: float = 1.0,
+    dias_por_semana: int = 5,
+    max_temas: int = 12,
+    instrucoes_extras: Optional[str] = None,
+) -> dict[str, Any]:
+    """Gera trilha a partir de vários PDFs/documentos mesclados."""
+    if len(documento_ids) < 2:
+        raise ValueError("Informe ao menos 2 documento_ids")
+    if len(documento_ids) > 20:
+        raise ValueError("Máximo de 20 documentos por trilha")
+
+    from app.document_text import load_document_for_id, merge_extracted_documents
+
+    docs = []
+    primary_id = documento_ids[0]
+    for did in documento_ids:
+        doc, row, _ = load_document_for_id(did)
+        docs.append(doc)
+    merged = merge_extracted_documents(docs)
+    texto_merged = merged.text
+    if len(texto_merged.strip()) < 50:
+        raise ValueError("Texto mesclado insuficiente para gerar trilha")
+
+    return gerar_trilha(
+        documento_id=primary_id,
+        objetivo=objetivo,
+        semanas=semanas,
+        horas_por_dia=horas_por_dia,
+        dias_por_semana=dias_por_semana,
+        max_temas=max_temas,
+        instrucoes_extras=instrucoes_extras,
+        texto=texto_merged,
+    )
+
+
 def gerar_sala(
     trilha_id: int,
     *,

@@ -52,7 +52,15 @@ def _dedupe(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return unique
 
 
-def _normalize_card(c: dict[str, Any], idioma: str) -> dict[str, Any]:
+def _truncate_text(text: str, max_chars: int) -> str:
+    s = (text or "").strip()
+    if len(s) <= max_chars:
+        return s
+    cut = s[: max_chars - 1].rsplit(" ", 1)[0]
+    return (cut or s[: max_chars - 1]) + "…"
+
+
+def _normalize_card(c: dict[str, Any], idioma: str, *, textos_curtos: bool = False) -> dict[str, Any]:
     tags = c.get("tags")
     if isinstance(tags, str):
         tags = [t.strip() for t in tags.split(",") if t.strip()]
@@ -61,15 +69,30 @@ def _normalize_card(c: dict[str, Any], idioma: str) -> dict[str, Any]:
     fonte = c.get("fonte")
     if not isinstance(fonte, dict):
         fonte = None
+    frente = str(c.get("frente") or "").strip()
+    verso = str(c.get("verso") or "").strip()
+    if textos_curtos:
+        frente = _truncate_text(frente, 120)
+        verso = _truncate_text(verso, 200)
     return {
-        "frente": str(c.get("frente") or "").strip(),
-        "verso": str(c.get("verso") or "").strip(),
+        "frente": frente,
+        "verso": verso,
         "dica": None,
         "tags": tags,
         "dificuldade": c.get("dificuldade"),
         "referencia": None,
         "fonte": fonte,
     }
+
+
+def _wants_textos_curtos(instrucoes_extras: Optional[str]) -> bool:
+    if not instrucoes_extras:
+        return False
+    low = instrucoes_extras.lower()
+    return any(
+        k in low
+        for k in ("curto", "curta", "objetiv", "concis", "breve", "máximo", "maximo", "1 frase")
+    )
 
 
 def _generate_cards_from_text(
@@ -123,6 +146,7 @@ def _generate_cards_from_text(
 
     all_cards: list[dict[str, Any]] = []
     errors: list[str] = []
+    textos_curtos = _wants_textos_curtos(instrucoes_extras)
     t_start = time.time()
     _log(
         f"inicio: ate {len(chunks_pool)} chunk(s) | idioma={idioma} | "
@@ -149,7 +173,7 @@ def _generate_cards_from_text(
             )
             novas = 0
             for raw in result.get("flashcards", []):
-                card = _normalize_card(raw, idioma)
+                card = _normalize_card(raw, idioma, textos_curtos=textos_curtos)
                 if card["frente"] and card["verso"]:
                     all_cards.append(card)
                     novas += 1
