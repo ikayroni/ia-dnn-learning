@@ -202,6 +202,43 @@ CREATE INDEX IF NOT EXISTS idx_card_deck ON flashcards(deck_id, ordem);
 CREATE INDEX IF NOT EXISTS idx_card_due ON flashcards(due_em);
 CREATE INDEX IF NOT EXISTS idx_rev_card ON flashcard_revisoes(flashcard_id);
 CREATE INDEX IF NOT EXISTS idx_rev_data ON flashcard_revisoes(criado_em DESC);
+
+-- Mapas mentais (estilo MindMeister) — árvore de nós gerada por IA ou manual
+CREATE TABLE IF NOT EXISTS mapas_mentais (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    documento_id INTEGER REFERENCES documentos(id) ON DELETE SET NULL,
+    trilha_id INTEGER REFERENCES trilhas(id) ON DELETE SET NULL,
+    etapa_id INTEGER REFERENCES trilha_etapas(id) ON DELETE SET NULL,
+    titulo TEXT NOT NULL,
+    descricao TEXT,
+    tema TEXT,
+    idioma TEXT,
+    fonte TEXT,                       -- "ia_texto", "ia_pdf", "ia_documento", "ia_multi_documento", "manual"
+    modelo TEXT,
+    meta_json TEXT,
+    criado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    atualizado_em TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS mapa_nos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mapa_id INTEGER NOT NULL REFERENCES mapas_mentais(id) ON DELETE CASCADE,
+    parent_id INTEGER REFERENCES mapa_nos(id) ON DELETE CASCADE,   -- NULL = raiz
+    ordem INTEGER NOT NULL DEFAULT 0,
+    titulo TEXT NOT NULL,
+    nota TEXT,                        -- detalhe/resumo opcional do nó
+    cor TEXT,                         -- cor do ramo (herdada pela UI se vazia)
+    colapsado INTEGER NOT NULL DEFAULT 0,
+    pos_x REAL,                       -- posição manual (arrastar); NULL = layout automático
+    pos_y REAL,
+    imagem_url TEXT,                  -- imagem anexada ao nó
+    criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_mapa_doc ON mapas_mentais(documento_id);
+CREATE INDEX IF NOT EXISTS idx_mapa_trilha ON mapas_mentais(trilha_id);
+CREATE INDEX IF NOT EXISTS idx_no_mapa ON mapa_nos(mapa_id, ordem);
+CREATE INDEX IF NOT EXISTS idx_no_parent ON mapa_nos(parent_id);
 """
 
 
@@ -238,6 +275,11 @@ _MIGRATIONS = {
     ],
     "flashcard_revisoes": [
         ("comentario", "TEXT"),
+    ],
+    "mapa_nos": [
+        ("pos_x", "REAL"),
+        ("pos_y", "REAL"),
+        ("imagem_url", "TEXT"),
     ],
 }
 

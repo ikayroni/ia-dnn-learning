@@ -644,6 +644,91 @@ TEXTO:
     return {"flashcards": cards}
 
 
+def gerar_mapa_mental(
+    text: str,
+    *,
+    tema: Optional[str] = None,
+    instrucoes_extras: Optional[str] = None,
+    idioma: str = "pt",
+    max_ramos: int = 6,
+    profundidade: int = 3,
+    max_filhos: int = 5,
+) -> dict:
+    """Gera um mapa mental hierárquico (estilo MindMeister) a partir do material.
+
+    Diferente dos flashcards (lista plana por chunk), o mapa é uma visão GLOBAL do
+    conteúdo, então usamos uma amostra do texto numa única chamada.
+
+    Retorna:
+        {
+          "titulo": "...",
+          "raiz": {
+            "titulo": "...",
+            "nota": "resumo curto ou null",
+            "filhos": [ { "titulo": "...", "nota": "...", "filhos": [...] } ]
+          }
+        }
+    """
+    idioma_nome = IDIOMA_NOMES.get(idioma, IDIOMA_NOMES["pt"])
+    max_ramos = max(2, min(int(max_ramos or 6), 10))
+    profundidade = max(2, min(int(profundidade or 3), 5))
+    max_filhos = max(2, min(int(max_filhos or 5), 8))
+
+    system = f"""Você organiza conhecimento em MAPAS MENTAIS hierárquicos (estilo MindMeister).
+Construa o mapa EXCLUSIVAMENTE com base no TEXTO fornecido — não invente fatos fora do texto.
+Idioma OBRIGATÓRIO de todos os títulos/notas: {idioma_nome}.
+Responda APENAS com JSON válido (sem markdown, sem comentários, sem texto fora do JSON).
+
+Princípios de um bom mapa mental:
+- 1 nó raiz = o TEMA CENTRAL do material (curto, 2–5 palavras).
+- Ramos principais = os grandes tópicos (substantivos/frases curtas, NÃO frases longas).
+- Cada nível aprofunda o nível anterior (do geral para o específico).
+- "titulo": rótulo curto (máx. ~6 palavras). "nota": 1 frase de contexto OU null.
+- Não repita o mesmo rótulo em ramos diferentes.
+- Equilibre a árvore: distribua os subtópicos entre os ramos principais."""
+
+    tema_line = ""
+    if tema and tema.strip():
+        tema_line = f'FOCO/TEMA: priorize o assunto "{tema.strip()}" ao montar o mapa.\n'
+    extras_line = ""
+    if instrucoes_extras and instrucoes_extras.strip():
+        extras_line = f"Instruções adicionais: {instrucoes_extras.strip()}\n"
+
+    user = f"""{tema_line}{extras_line}Monte um mapa mental do TEXTO abaixo.
+
+Regras de tamanho:
+- No máximo {max_ramos} ramos principais (filhos diretos da raiz).
+- Profundidade máxima de {profundidade} níveis abaixo da raiz.
+- No máximo {max_filhos} filhos por nó.
+
+Formato JSON obrigatório (sem markdown):
+{{
+  "titulo": "tema central curto",
+  "raiz": {{
+    "titulo": "tema central curto",
+    "nota": null,
+    "filhos": [
+      {{
+        "titulo": "ramo principal",
+        "nota": "contexto em 1 frase ou null",
+        "filhos": [
+          {{ "titulo": "subtópico", "nota": null, "filhos": [] }}
+        ]
+      }}
+    ]
+  }}
+}}
+
+TEXTO DO MATERIAL (amostra):
+{text[:12000]}"""
+
+    data = _converse_json(system, user, max_tokens=6000, temperature=0.3)
+    raiz = data.get("raiz")
+    if not isinstance(raiz, dict) or not str(raiz.get("titulo") or "").strip():
+        raise ValueError("LLM não retornou uma raiz válida para o mapa mental.")
+    return data
+
+
 def generate_trilha_plano(
     *,
     sample_text: str,

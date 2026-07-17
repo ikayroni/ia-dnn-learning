@@ -722,3 +722,129 @@ class RevisaoHistoricoItem(BaseModel):
 class RevisoesHistoricoResponse(BaseModel):
     flashcard_id: int
     revisoes: List[RevisaoHistoricoItem] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Mapas mentais (estilo MindMeister) — árvore de nós gerada por IA ou manual
+# ---------------------------------------------------------------------------
+
+
+class MapaGerarTextoRequest(BaseModel):
+    texto: str = Field(..., min_length=50, description="Conteúdo base para o mapa mental")
+    titulo: Optional[str] = Field(default=None, max_length=200, description="Título do mapa")
+    tema: Optional[str] = Field(default=None, description="Foco temático do mapa")
+    max_ramos: int = Field(default=6, ge=2, le=10, description="Ramos principais (nível 1)")
+    profundidade: int = Field(default=3, ge=2, le=5, description="Níveis abaixo da raiz")
+    max_filhos: int = Field(default=5, ge=2, le=8, description="Máx. de filhos por nó")
+    instrucoes_extras: Optional[str] = Field(default=None, max_length=500)
+    idioma: Idioma = Field(default="pt", description="pt | en | it")
+
+
+class MapaGerarMultiRequest(BaseModel):
+    documento_ids: List[int] = Field(
+        ...,
+        min_length=1,
+        max_length=20,
+        description="IDs de documentos do histórico a combinar.",
+    )
+    titulo: Optional[str] = Field(default=None, max_length=200)
+    tema: Optional[str] = Field(default=None)
+    max_ramos: int = Field(default=6, ge=2, le=10)
+    profundidade: int = Field(default=3, ge=2, le=5)
+    max_filhos: int = Field(default=5, ge=2, le=8)
+    instrucoes_extras: Optional[str] = Field(default=None, max_length=500)
+    idioma: Idioma = Field(default="pt")
+
+
+class MapaNoManualIn(BaseModel):
+    """Nó informado manualmente na criação de um mapa sem IA (árvore aninhada)."""
+
+    titulo: str = Field(..., min_length=1, max_length=300)
+    nota: Optional[str] = Field(default=None, max_length=2000)
+    cor: Optional[str] = Field(default=None, max_length=32)
+    filhos: List["MapaNoManualIn"] = Field(default_factory=list)
+
+
+class MapaCriarRequest(BaseModel):
+    """Cria um mapa manualmente (sem IA) a partir de uma árvore de nós."""
+
+    titulo: str = Field(..., min_length=1, max_length=200)
+    descricao: Optional[str] = Field(default=None, max_length=1000)
+    tema: Optional[str] = None
+    idioma: Idioma = Field(default="pt")
+    documento_id: Optional[int] = Field(default=None, ge=1)
+    raiz: MapaNoManualIn
+
+
+class MapaNoNovoIn(BaseModel):
+    """Adiciona um nó (filho) a um mapa existente."""
+
+    parent_id: Optional[int] = Field(default=None, description="NULL só se o mapa não tiver raiz")
+    titulo: str = Field(..., min_length=1, max_length=300)
+    nota: Optional[str] = Field(default=None, max_length=2000)
+    cor: Optional[str] = Field(default=None, max_length=32)
+
+
+class MapaNoUpdate(BaseModel):
+    titulo: Optional[str] = Field(default=None, min_length=1, max_length=300)
+    nota: Optional[str] = Field(default=None, max_length=2000)
+    cor: Optional[str] = Field(default=None, max_length=32)
+    colapsado: Optional[bool] = None
+    parent_id: Optional[int] = Field(default=None, description="Move o nó para outro pai")
+    ordem: Optional[int] = Field(default=None, ge=0)
+    pos_x: Optional[float] = Field(default=None, description="Posição manual X (arrastar)")
+    pos_y: Optional[float] = Field(default=None, description="Posição manual Y (arrastar)")
+    imagem_url: Optional[str] = Field(default=None, max_length=2000)
+
+
+class MapaUpdate(BaseModel):
+    titulo: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    descricao: Optional[str] = Field(default=None, max_length=1000)
+    tema: Optional[str] = None
+
+
+class MapaNoOut(BaseModel):
+    id: int
+    titulo: str
+    nota: Optional[str] = None
+    cor: Optional[str] = None
+    colapsado: bool = False
+    ordem: int = 0
+    pos_x: Optional[float] = None
+    pos_y: Optional[float] = None
+    imagem_url: Optional[str] = None
+    filhos: List["MapaNoOut"] = Field(default_factory=list)
+
+
+class MapaResumoOut(BaseModel):
+    id: int
+    documento_id: Optional[int] = None
+    titulo: str
+    descricao: Optional[str] = None
+    tema: Optional[str] = None
+    idioma: Optional[str] = None
+    fonte: Optional[str] = None
+    modelo: Optional[str] = None
+    nome_arquivo: Optional[str] = None
+    criado_em: Optional[str] = None
+    atualizado_em: Optional[str] = None
+    total_nos: int = 0
+
+
+class MapaOut(MapaResumoOut):
+    meta: Optional[Dict[str, Any]] = None
+    raiz: Optional[MapaNoOut] = None
+
+
+class MapasListResponse(BaseModel):
+    mapas: List[MapaResumoOut]
+    total: int
+
+
+class MapaGerarResponse(BaseModel):
+    mapa: MapaOut
+    meta: Dict[str, Any]
+
+
+MapaNoManualIn.model_rebuild()
+MapaNoOut.model_rebuild()

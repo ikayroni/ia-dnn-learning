@@ -138,6 +138,33 @@ from app.schemas import (
 
 from app.api_errors import _is_console_encode_error, raise_http_for_exception
 
+from app.mapas_service import (
+    generate_mapa_from_documento_id,
+    generate_mapa_from_multi_documento_ids,
+    generate_mapa_from_text,
+)
+from app.mapas_storage import (
+    add_no,
+    delete_mapa,
+    delete_no,
+    get_mapa,
+    list_mapas,
+    save_mapa,
+    update_mapa,
+    update_no,
+)
+from app.schemas import (
+    MapaCriarRequest,
+    MapaGerarMultiRequest,
+    MapaGerarResponse,
+    MapaGerarTextoRequest,
+    MapaNoNovoIn,
+    MapaNoUpdate,
+    MapaOut,
+    MapasListResponse,
+    MapaUpdate,
+)
+
 app = FastAPI(
     title="Gerador de Questões",
     description="Gera questões a partir de texto ou PDF (OCR Textract para scans)",
@@ -1508,3 +1535,202 @@ def flashcards_revisar(card_id: int, body: RevisaoIn):
 def flashcards_estatisticas():
     """Resumo: decks, cards, revisões, cards a revisar hoje, novos e dominados."""
     return FlashcardsEstatisticas(**get_flashcards_estatisticas())
+
+
+# ---------------------------------------------------------------------------
+# Mapas mentais (estilo MindMeister)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/mapas/gerar/texto", response_model=MapaGerarResponse)
+def mapas_gerar_texto(body: MapaGerarTextoRequest):
+    """Gera um mapa mental a partir de texto colado."""
+    try:
+        result = generate_mapa_from_text(
+            body.texto,
+            titulo=body.titulo,
+            tema=body.tema,
+            idioma=body.idioma,
+            max_ramos=body.max_ramos,
+            profundidade=body.profundidade,
+            max_filhos=body.max_filhos,
+            instrucoes_extras=body.instrucoes_extras,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return MapaGerarResponse(mapa=MapaOut(**result["mapa"]), meta=result["meta"])
+
+
+@app.post("/mapas/gerar/documento/{documento_id}", response_model=MapaGerarResponse)
+def mapas_gerar_documento(
+    documento_id: int,
+    tema: Optional[str] = None,
+    titulo: Optional[str] = None,
+    max_ramos: int = 6,
+    profundidade: int = 3,
+    max_filhos: int = 5,
+    instrucoes_extras: Optional[str] = None,
+    idioma: str = "pt",
+):
+    """Reusa um documento já salvo no histórico para gerar o mapa (sem reenviar PDF)."""
+    try:
+        result = generate_mapa_from_documento_id(
+            documento_id,
+            titulo=titulo,
+            tema=tema,
+            idioma=idioma,
+            max_ramos=max_ramos,
+            profundidade=profundidade,
+            max_filhos=max_filhos,
+            instrucoes_extras=instrucoes_extras,
+        )
+    except Exception as e:
+        raise_http_for_exception(e)
+    return MapaGerarResponse(mapa=MapaOut(**result["mapa"]), meta=result["meta"])
+
+
+@app.post("/mapas/gerar/multiplos-documentos", response_model=MapaGerarResponse)
+def mapas_gerar_multiplos(body: MapaGerarMultiRequest):
+    """Combina vários documentos do histórico para gerar um único mapa mental."""
+    try:
+        result = generate_mapa_from_multi_documento_ids(
+            body.documento_ids,
+            titulo=body.titulo,
+            tema=body.tema,
+            idioma=body.idioma,
+            max_ramos=body.max_ramos,
+            profundidade=body.profundidade,
+            max_filhos=body.max_filhos,
+            instrucoes_extras=body.instrucoes_extras,
+        )
+    except Exception as e:
+        raise_http_for_exception(e)
+    return MapaGerarResponse(mapa=MapaOut(**result["mapa"]), meta=result["meta"])
+
+
+@app.post("/mapas", response_model=MapaOut)
+def mapas_criar(body: MapaCriarRequest):
+    """Cria um mapa manualmente (sem IA) a partir de uma árvore de nós."""
+    mapa_id = save_mapa(
+        titulo=body.titulo,
+        raiz=body.raiz.model_dump(),
+        documento_id=body.documento_id,
+        descricao=body.descricao,
+        tema=body.tema,
+        idioma=body.idioma,
+        fonte="manual",
+    )
+    mapa = get_mapa(mapa_id)
+    if not mapa:
+        raise HTTPException(status_code=500, detail="Falha ao criar mapa")
+    return MapaOut(**mapa)
+
+
+@app.get("/mapas", response_model=MapasListResponse)
+def mapas_listar(documento_id: Optional[int] = None, limit: int = 50):
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit entre 1 e 200")
+    mapas = list_mapas(documento_id=documento_id, limit=limit)
+    return MapasListResponse(mapas=mapas, total=len(mapas))
+
+
+@app.get("/mapas/{mapa_id}", response_model=MapaOut)
+def mapas_obter(mapa_id: int):
+    mapa = get_mapa(mapa_id)
+    if not mapa:
+        raise HTTPException(status_code=404, detail="Mapa não encontrado")
+    return MapaOut(**mapa)
+
+
+@app.patch("/mapas/{mapa_id}", response_model=MapaOut)
+def mapas_atualizar(mapa_id: int, body: MapaUpdate):
+    updates = body.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="Envie ao menos um campo")
+    mapa = update_mapa(mapa_id, updates)
+    if not mapa:
+        raise HTTPException(status_code=404, detail="Mapa não encontrado")
+    return MapaOut(**mapa)
+
+
+@app.delete("/mapas/{mapa_id}")
+def mapas_excluir(mapa_id: int):
+    if not delete_mapa(mapa_id):
+        raise HTTPException(status_code=404, detail="Mapa não encontrado")
+    return {"deleted": True, "mapa_id": mapa_id}
+
+
+@app.post("/mapas/{mapa_id}/nos", response_model=MapaOut)
+def mapas_add_no(mapa_id: int, body: MapaNoNovoIn):
+    """Adiciona um nó (filho) ao mapa."""
+    try:
+        mapa = add_no(
+            mapa_id,
+            parent_id=body.parent_id,
+            titulo=body.titulo,
+            nota=body.nota,
+            cor=body.cor,
+        )
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    if not mapa:
+        raise HTTPException(status_code=404, detail="Mapa não encontrado")
+    return MapaOut(**mapa)
+
+
+@app.patch("/mapas/nos/{no_id}", response_model=MapaOut)
+def mapas_atualizar_no(no_id: int, body: MapaNoUpdate):
+    updates = body.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="Envie ao menos um campo")
+    try:
+        mapa = update_no(no_id, updates)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not mapa:
+        raise HTTPException(status_code=404, detail="Nó não encontrado")
+    return MapaOut(**mapa)
+
+
+@app.delete("/mapas/nos/{no_id}", response_model=MapaOut)
+def mapas_excluir_no(no_id: int):
+    """Exclui um nó e seus descendentes (a raiz não pode ser removida)."""
+    try:
+        mapa = delete_no(no_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not mapa:
+        raise HTTPException(status_code=404, detail="Nó não encontrado")
+    return MapaOut(**mapa)
+
+
+@app.post("/mapas/nos/{no_id}/imagem", response_model=MapaOut)
+async def mapas_upload_imagem_no(no_id: int, arquivo: UploadFile = File(...)):
+    """Anexa uma imagem a um nó do mapa (upload de arquivo)."""
+    import uuid
+
+    if not arquivo.filename:
+        raise HTTPException(status_code=400, detail="Arquivo inválido")
+    ext = arquivo.filename.rsplit(".", 1)[-1].lower()
+    if ext not in ("jpg", "jpeg", "png", "gif", "webp"):
+        raise HTTPException(status_code=400, detail="Formato não suportado. Use JPG, PNG, GIF ou WebP.")
+    data = await arquivo.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Imagem maior que 5 MB")
+
+    dest_dir = UPLOADS_DIR / "mapas"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    fname = f"{no_id}_{uuid.uuid4().hex[:10]}.{ext}"
+    path = dest_dir / fname
+    path.write_bytes(data)
+
+    imagem_url = f"/uploads/mapas/{fname}"
+    mapa = update_no(no_id, {"imagem_url": imagem_url})
+    if not mapa:
+        path.unlink(missing_ok=True)
+        raise HTTPException(status_code=404, detail="Nó não encontrado")
+    return MapaOut(**mapa)
