@@ -39,6 +39,43 @@ IDIOMA_NOMES = {
 }
 
 
+def _bloco_idioma(idioma: str) -> str:
+    """Diretiva de idioma FORTE, escrita no próprio idioma-alvo para ancorar o modelo.
+
+    Modelos menores (ex.: Nova Lite) tendem a responder no idioma do prompt. Como os
+    prompts são em português, precisamos de uma instrução enfática e repetida para
+    forçar a saída no idioma escolhido, sem misturar.
+    """
+    if idioma == "it":
+        return (
+            "########## LINGUA DI OUTPUT ##########\n"
+            "LINGUA OBBLIGATORIA: ITALIANO.\n"
+            "Scrivi ASSOLUTAMENTE TUTTO (enunciato, alternative, spiegazioni, tag) "
+            "esclusivamente in ITALIANO.\n"
+            "È VIETATO usare portoghese, inglese o qualsiasi altra lingua, anche una sola parola.\n"
+            "Se il testo di partenza è in un'altra lingua, TRADUCI comunque il contenuto in italiano.\n"
+            "######################################\n"
+        )
+    if idioma == "en":
+        return (
+            "########## OUTPUT LANGUAGE ##########\n"
+            "MANDATORY LANGUAGE: ENGLISH.\n"
+            "Write ABSOLUTELY EVERYTHING (statement, options, explanations, tags) in ENGLISH only.\n"
+            "Do NOT use Portuguese, Italian or any other language, not even a single word.\n"
+            "If the source text is in another language, TRANSLATE the content into English anyway.\n"
+            "####################################\n"
+        )
+    return (
+        "########## IDIOMA DE SAÍDA ##########\n"
+        "IDIOMA OBRIGATÓRIO: PORTUGUÊS (BRASIL).\n"
+        "Escreva ABSOLUTAMENTE TUDO (enunciado, alternativas, explicações, tags) "
+        "somente em PORTUGUÊS.\n"
+        "NÃO use italiano, inglês ou qualquer outro idioma, nem uma única palavra.\n"
+        "Se o texto-fonte estiver em outro idioma, TRADUZA o conteúdo para português mesmo assim.\n"
+        "####################################\n"
+    )
+
+
 ESTILO_DESC_PT = {
     "geral": "Questões teóricas objetivas baseadas no conteúdo.",
     "clinico": (
@@ -171,10 +208,12 @@ def _build_system_prompt(idioma: str, num_alternativas: int, incluir_explicacao:
         "que sustenta a resposta — copie o trecho relevante do material fornecido."
     ) if incluir_explicacao else "Campos de explicação não são obrigatórios."
 
-    return f"""Você é um banco de questões médico de alto nível (estilo Revalida / Residência / USMLE).
+    return f"""{_bloco_idioma(idioma)}
+Você é um banco de questões médico de alto nível (estilo Revalida / Residência / USMLE).
 Gere questões EXCLUSIVAMENTE com base no TEXTO fornecido pelo usuário.
 Não invente dados clínicos, dosagens ou condutas que não estejam apoiados pelo texto.
-Idioma de saída OBRIGATÓRIO para enunciado, alternativas e explicações: {idioma_nome}.
+Idioma de saída OBRIGATÓRIO para enunciado, alternativas e explicações: {idioma_nome} (releia o bloco acima).
+NÃO gere questões repetidas nem variações triviais da mesma pergunta — cada questão deve abordar um aspecto clínico distinto.
 Responda APENAS com JSON válido (sem markdown, sem comentários, sem texto fora do JSON).
 Tipos permitidos: {tipos}.
 
@@ -285,6 +324,7 @@ Formato JSON obrigatório (sem markdown):
   ]
 }}
 
+{_bloco_idioma(idioma)}
 TEXTO:
 {chunk_text}"""
 
@@ -674,15 +714,17 @@ def gerar_flashcards(
     """
     idioma_nome = IDIOMA_NOMES.get(idioma, IDIOMA_NOMES["pt"])
 
-    system = f"""Você cria FLASHCARDS de estudo objetivos para memorização (estilo Anki) em medicina.
+    system = f"""{_bloco_idioma(idioma)}
+Você cria FLASHCARDS de estudo objetivos para memorização (estilo Anki) em medicina.
 Gere os cards EXCLUSIVAMENTE com base no TEXTO fornecido — não invente fatos fora do texto.
-Idioma OBRIGATÓRIO de frente e verso: {idioma_nome}.
+Idioma OBRIGATÓRIO de frente, verso e tags: {idioma_nome} (releia o bloco acima).
 Responda APENAS com JSON válido (sem markdown, sem comentários, sem texto fora do JSON).
 
 Princípios:
 - FRENTE: pergunta direta, UMA ideia por card (máx. 1 frase curta, até ~15 palavras).
 - VERSO: resposta objetiva e memorável (máx. 2 frases curtas ou lista de até 4 itens).
 - Foco em recall ativo; evite parágrafos longos, repetições e cards triviais.
+- NÃO gere cards repetidos nem variações triviais da mesma pergunta.
 - Prefira termos-chave e definições diretas em vez de explicações longas.
 - NÃO inclua dicas mnemônicas nem citações de trecho no verso.
 - Use "dica": null e "referencia": null sempre."""
@@ -727,6 +769,7 @@ Formato JSON obrigatório (sem markdown):
   ]
 }}
 
+{_bloco_idioma(idioma)}
 TEXTO:
 {chunk_text}"""
 
