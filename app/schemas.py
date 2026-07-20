@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 TipoQuestao = Literal["multipla_escolha", "verdadeiro_falso", "dissertativa"]
 Dificuldade = Literal["facil", "media", "dificil"]
@@ -18,6 +18,45 @@ EstiloQuestao = Literal[
     "saude_publica",
     "imagem",
 ]
+
+# LLM às vezes devolve IT/EN; o enum canônico é PT.
+_DIFICULDADE_ALIASES: dict[str, str] = {
+    "facil": "facil",
+    "fácil": "facil",
+    "facile": "facil",
+    "easy": "facil",
+    "media": "media",
+    "média": "media",
+    "medio": "media",
+    "médio": "media",
+    "medium": "media",
+    "normale": "media",
+    "normal": "media",
+    "dificil": "dificil",
+    "difícil": "dificil",
+    "difficile": "dificil",
+    "hard": "dificil",
+    "difficult": "dificil",
+}
+
+
+def coerce_dificuldade(value: Any) -> Any:
+    if value is None or value == "":
+        return None
+    key = str(value).strip().lower()
+    mapped = _DIFICULDADE_ALIASES.get(key)
+    if mapped:
+        return mapped
+    plain = (
+        key.replace("á", "a")
+        .replace("à", "a")
+        .replace("ã", "a")
+        .replace("é", "e")
+        .replace("í", "i")
+        .replace("ó", "o")
+        .replace("ú", "u")
+    )
+    return _DIFICULDADE_ALIASES.get(plain, value)
 
 
 class FonteQuestao(BaseModel):
@@ -574,6 +613,11 @@ class Flashcard(BaseModel):
     imagem_url: Optional[str] = Field(
         default=None, description="URL ou caminho de imagem ilustrativa do card."
     )
+
+    @field_validator("dificuldade", mode="before")
+    @classmethod
+    def _coerce_dificuldade(cls, v: Any) -> Any:
+        return coerce_dificuldade(v)
 
 
 class FlashcardsGerarTextoRequest(BaseModel):

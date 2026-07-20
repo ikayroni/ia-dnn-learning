@@ -769,6 +769,9 @@ Formato JSON obrigatório (sem markdown):
   ]
 }}
 
+IMPORTANTE: o campo "dificuldade" deve ser EXATAMENTE uma destas strings em português:
+"facil", "media" ou "dificil" (nunca "facile", "difficile", "easy", "hard", etc.).
+
 {_bloco_idioma(idioma)}
 TEXTO:
 {chunk_text}"""

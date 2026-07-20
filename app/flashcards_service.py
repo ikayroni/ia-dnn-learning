@@ -60,6 +60,49 @@ def _truncate_text(text: str, max_chars: int) -> str:
     return (cut or s[: max_chars - 1]) + "…"
 
 
+# Enum canônico (PT). O LLM às vezes devolve IT/EN quando idioma=it/en.
+_DIFICULDADE_ALIASES: dict[str, str] = {
+    "facil": "facil",
+    "fácil": "facil",
+    "facile": "facil",
+    "easy": "facil",
+    "media": "media",
+    "média": "media",
+    "medio": "media",
+    "médio": "media",
+    "medium": "media",
+    "normale": "media",
+    "normal": "media",
+    "dificil": "dificil",
+    "difícil": "dificil",
+    "difficile": "dificil",
+    "hard": "dificil",
+    "difficult": "dificil",
+}
+
+
+def _normalize_dificuldade(raw: Any) -> str | None:
+    if raw is None:
+        return None
+    key = str(raw).strip().lower()
+    if not key:
+        return None
+    mapped = _DIFICULDADE_ALIASES.get(key)
+    if mapped:
+        return mapped
+    # fallback sem acento
+    plain = (
+        key.replace("á", "a")
+        .replace("à", "a")
+        .replace("ã", "a")
+        .replace("é", "e")
+        .replace("í", "i")
+        .replace("ó", "o")
+        .replace("ú", "u")
+    )
+    return _DIFICULDADE_ALIASES.get(plain)
+
+
 def _normalize_card(c: dict[str, Any], idioma: str, *, textos_curtos: bool = False) -> dict[str, Any]:
     tags = c.get("tags")
     if isinstance(tags, str):
@@ -79,7 +122,7 @@ def _normalize_card(c: dict[str, Any], idioma: str, *, textos_curtos: bool = Fal
         "verso": verso,
         "dica": None,
         "tags": tags,
-        "dificuldade": c.get("dificuldade"),
+        "dificuldade": _normalize_dificuldade(c.get("dificuldade")),
         "referencia": None,
         "fonte": fonte,
     }
