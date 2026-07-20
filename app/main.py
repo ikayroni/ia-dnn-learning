@@ -29,6 +29,8 @@ from app.ocr_jobs import (
 )
 from app.schemas import (
     AtividadeStatusUpdate,
+    ClassificarTemasRequest,
+    ClassificarTemasResponse,
     EtapaManualIn,
     EtapasReorder,
     EtapaStatusUpdate,
@@ -485,6 +487,28 @@ def traduzir(body: TraduzirRequest):
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     return TraduzirResponse(idioma=body.idioma, itens=result.get("itens", []))
+
+
+@app.post("/questoes/classificar-temas", response_model=ClassificarTemasResponse)
+def classificar_temas(body: ClassificarTemasRequest):
+    """Classifica tema (categoria) e subtema (subcategoria) de questões via Bedrock.
+
+    Usa como referência a taxonomia fixa (baseada no TEMAS.docx) em app/data/taxonomia_temas.json,
+    mas pode sugerir um tema/subtema novo (marcando "novo": true) quando nada da lista encaixar.
+    Usado pelo backend Node para preencher tags faltantes no banco de questões importado.
+    """
+    from app.bedrock import classificar_temas_questoes
+    from app.taxonomia import carregar_taxonomia
+
+    itens = [it.model_dump() for it in body.itens]
+    taxonomia = carregar_taxonomia()
+    try:
+        result = classificar_temas_questoes(itens, body.disciplina, taxonomia)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return ClassificarTemasResponse(itens=result.get("itens", []))
 
 
 @app.post("/simulados/planejar", response_model=SimuladoPlanejarResponse)

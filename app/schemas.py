@@ -77,6 +77,39 @@ class TraduzirResponse(BaseModel):
     itens: List[TraduzirItemOut]
 
 
+class ClassificarTemaItemIn(BaseModel):
+    id: str = Field(..., description="Identificador da questão (ecoado na resposta)")
+    enunciado: str = Field(default="")
+    alternativas: List[str] = Field(default_factory=list)
+    gabarito: Optional[str] = None
+    categoria_atual: Optional[str] = Field(
+        default=None,
+        description="Tema já conhecido da questão (quando falta apenas o subtema).",
+    )
+
+
+class ClassificarTemaItemOut(BaseModel):
+    id: str
+    categoria: str = Field(..., description="Tema/disciplina escolhido")
+    subcategoria: Optional[str] = Field(default=None, description="Subtema/assunto escolhido")
+    novo: bool = Field(
+        default=False,
+        description="True quando o tema/subtema sugerido não está na taxonomia de referência.",
+    )
+
+
+class ClassificarTemasRequest(BaseModel):
+    disciplina: Optional[str] = Field(
+        default=None,
+        description="Chave da taxonomia (ex.: 'CLINICA MEDICA') para restringir a busca de temas.",
+    )
+    itens: List[ClassificarTemaItemIn] = Field(..., min_length=1, max_length=30)
+
+
+class ClassificarTemasResponse(BaseModel):
+    itens: List[ClassificarTemaItemOut]
+
+
 class SimuladoMateriaContexto(BaseModel):
     banco_id: str
     banco_nome: str

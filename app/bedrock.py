@@ -563,6 +563,99 @@ ITENS (JSON):
     return {"itens": out}
 
 
+def _formatar_taxonomia(taxonomia: dict, disciplina: str | None) -> str:
+    """Formata a taxonomia (disciplina -> tema -> [subtemas]) como texto legível para o prompt."""
+    if not isinstance(taxonomia, dict) or not taxonomia:
+        return "(nenhuma taxonomia de referência disponível)"
+
+    disciplinas = taxonomia
+    if disciplina:
+        chave = disciplina.strip().upper()
+        if chave in taxonomia:
+            disciplinas = {chave: taxonomia[chave]}
+
+    linhas: list[str] = []
+    for nome_disciplina, temas in disciplinas.items():
+        linhas.append(f"{nome_disciplina}:")
+        if not isinstance(temas, dict):
+            continue
+        for tema, subtemas in temas.items():
+            if subtemas:
+                linhas.append(f"  - {tema}: {'; '.join(subtemas)}")
+            else:
+                linhas.append(f"  - {tema}")
+    return "\n".join(linhas)
+
+
+def classificar_temas_questoes(
+    itens: list[dict],
+    disciplina: str | None,
+    taxonomia: dict,
+) -> dict:
+    """Classifica questões com tema (categoria) e subtema (subcategoria) clínicos.
+
+    Usa a taxonomia de referência (baseada no TEMAS.docx) preferencialmente, mas pode
+    sugerir um tema/subtema novo (marcando "novo": true) quando nada da lista encaixar bem.
+
+    Cada item de entrada: {"id": str, "enunciado": str, "alternativas": [str, ...],
+    "gabarito": str | None, "categoria_atual": str | None}.
+    Retorna {"itens": [ {"id", "categoria", "subcategoria", "novo"} ]}.
+    """
+    if not isinstance(itens, list) or not itens:
+        return {"itens": []}
+
+    payload = []
+    for it in itens:
+        payload.append(
+            {
+                "id": str(it.get("id", "")),
+                "enunciado": it.get("enunciado") or "",
+                "alternativas": it.get("alternativas") or [],
+                "gabarito": it.get("gabarito") or None,
+                "categoria_atual": it.get("categoria_atual") or None,
+            }
+        )
+
+    taxonomia_texto = _formatar_taxonomia(taxonomia, disciplina)
+
+    system = """Você é um especialista em classificar questões de provas médicas
+(Revalida/Residência) por TEMA (disciplina/assunto principal) e SUBTEMA (assunto específico
+dentro do tema), com base no conteúdo clínico do enunciado, alternativas e gabarito.
+
+Regras:
+- PREFIRA sempre um tema e, se possível, um subtema da TAXONOMIA DE REFERÊNCIA abaixo.
+- Se a questão já tiver "categoria_atual" preenchida, mantenha esse tema e escolha apenas
+  o subtema mais adequado dentro dele (não troque o tema).
+- Só sugira um tema ou subtema FORA da taxonomia quando nenhuma opção da lista fizer sentido
+  clinicamente; nesse caso marque "novo": true. Se usar algo da lista, "novo": false.
+- Se não for possível identificar um subtema específico com confiança, retorne
+  "subcategoria": null (mas sempre retorne uma "categoria").
+- Preserve o campo "id" exatamente como recebido.
+Responda APENAS com JSON válido (sem markdown, sem comentários, sem texto fora do JSON)."""
+
+    user = f"""TAXONOMIA DE REFERÊNCIA (disciplina > tema: subtemas):
+{taxonomia_texto}
+
+Classifique cada questão abaixo com o tema (campo "categoria") e o subtema (campo
+"subcategoria") mais adequados.
+
+Formato JSON obrigatório de saída (sem markdown):
+{{
+  "itens": [
+    {{ "id": "...", "categoria": "...", "subcategoria": "... ou null", "novo": false }}
+  ]
+}}
+
+QUESTÕES (JSON):
+{json.dumps(payload, ensure_ascii=False)}"""
+
+    data = _converse_json(system, user, max_tokens=4000, temperature=0.1)
+    out = data.get("itens", [])
+    if not isinstance(out, list):
+        return {"itens": []}
+    return {"itens": out}
+
+
 def gerar_flashcards(
     chunk_text: str,
     *,
