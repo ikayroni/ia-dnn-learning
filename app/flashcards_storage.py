@@ -161,6 +161,7 @@ def save_deck(
     fonte: Optional[str] = None,
     modelo: Optional[str] = None,
     meta: Optional[dict] = None,
+    pasta_id: Optional[int] = None,
 ) -> int:
     init_db()
     cards_dicts: list[dict[str, Any]] = []
@@ -172,8 +173,8 @@ def save_deck(
     with connect() as conn:
         cur = conn.execute(
             """INSERT INTO flashcard_decks
-               (documento_id, trilha_id, etapa_id, titulo, descricao, tema, idioma, fonte, modelo, meta_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (documento_id, trilha_id, etapa_id, titulo, descricao, tema, idioma, fonte, modelo, meta_json, pasta_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 documento_id,
                 trilha_id,
@@ -185,6 +186,7 @@ def save_deck(
                 fonte,
                 modelo,
                 json.dumps(meta, ensure_ascii=False, default=str) if meta else None,
+                pasta_id,
             ),
         )
         deck_id = int(cur.lastrowid)
@@ -226,13 +228,46 @@ def _deck_counts(conn, deck_id: int) -> tuple[int, int, int]:
     return int(total), int(due), int(novos)
 
 
-def list_decks(*, documento_id: Optional[int] = None, limit: int = 50) -> list[dict[str, Any]]:
+def _deck_summary_from_row(conn, r: Any) -> dict[str, Any]:
+    deck_id = int(r["id"])
+    total, due, novos = _deck_counts(conn, deck_id)
+    keys = set(r.keys())
+    return {
+        "id": deck_id,
+        "documento_id": r["documento_id"],
+        "pasta_id": r["pasta_id"] if "pasta_id" in keys else None,
+        "titulo": r["titulo"],
+        "descricao": r["descricao"],
+        "tema": r["tema"],
+        "idioma": r["idioma"],
+        "fonte": r["fonte"],
+        "modelo": r["modelo"],
+        "nome_arquivo": r["nome_arquivo"] if "nome_arquivo" in keys else None,
+        "criado_em": r["criado_em"],
+        "total_cards": total,
+        "cards_due": due,
+        "cards_novos": novos,
+    }
+
+
+def list_decks(
+    *,
+    documento_id: Optional[int] = None,
+    pasta_id: Optional[int] = None,
+    sem_pasta: bool = False,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
     init_db()
     wheres = []
     params: list[Any] = []
     if documento_id is not None:
         wheres.append("dk.documento_id = ?")
         params.append(documento_id)
+    if sem_pasta:
+        wheres.append("dk.pasta_id IS NULL")
+    elif pasta_id is not None:
+        wheres.append("dk.pasta_id = ?")
+        params.append(pasta_id)
     where_sql = ("WHERE " + " AND ".join(wheres)) if wheres else ""
     with connect() as conn:
         rows = conn.execute(
@@ -244,27 +279,7 @@ def list_decks(*, documento_id: Optional[int] = None, limit: int = 50) -> list[d
                 LIMIT ?""",
             (*params, limit),
         ).fetchall()
-        out = []
-        for r in rows:
-            total, due, novos = _deck_counts(conn, int(r["id"]))
-            out.append(
-                {
-                    "id": int(r["id"]),
-                    "documento_id": r["documento_id"],
-                    "titulo": r["titulo"],
-                    "descricao": r["descricao"],
-                    "tema": r["tema"],
-                    "idioma": r["idioma"],
-                    "fonte": r["fonte"],
-                    "modelo": r["modelo"],
-                    "nome_arquivo": r["nome_arquivo"],
-                    "criado_em": r["criado_em"],
-                    "total_cards": total,
-                    "cards_due": due,
-                    "cards_novos": novos,
-                }
-            )
-        return out
+        return [_deck_summary_from_row(conn, r) for r in rows]
 
 
 def get_deck(deck_id: int) -> Optional[dict[str, Any]]:
@@ -293,6 +308,7 @@ def get_deck(deck_id: int) -> Optional[dict[str, Any]]:
     return {
         "id": int(r["id"]),
         "documento_id": r["documento_id"],
+        "pasta_id": r["pasta_id"] if "pasta_id" in r.keys() else None,
         "titulo": r["titulo"],
         "descricao": r["descricao"],
         "tema": r["tema"],
@@ -307,6 +323,31 @@ def get_deck(deck_id: int) -> Optional[dict[str, Any]]:
         "cards_novos": novos,
         "cards": [_card_row_to_dict(c) for c in cards],
     }
+
+
+def update_deck(deck_id: int, updates: dict[str, Any]) -> Optional[dict[str, Any]]:
+    init_db()
+    field_map = {
+        "titulo": "titulo",
+        "descricao": "descricao",
+        "tema": "tema",
+        "pasta_id": "pasta_id",
+    }
+    sets: list[str] = []
+    params: list[Any] = []
+    for key, col in field_map.items():
+        if key in updates:
+            sets.append(f"{col}=?")
+            params.append(updates[key])
+    if not sets:
+        return get_deck(deck_id)
+    with connect() as conn:
+        if conn.execute("SELECT id FROM flashcard_decks WHERE id = ?", (deck_id,)).fetchone() is None:
+            return None
+        params.append(deck_id)
+        conn.execute(f"UPDATE flashcard_decks SET {', '.join(sets)} WHERE id = ?", tuple(params))
+        conn.commit()
+    return get_deck(deck_id)
 
 
 def delete_deck(deck_id: int) -> bool:

@@ -83,14 +83,15 @@ def save_mapa(
     fonte: Optional[str] = None,
     modelo: Optional[str] = None,
     meta: Optional[dict] = None,
+    pasta_id: Optional[int] = None,
 ) -> int:
     """Cria um mapa mental completo a partir de uma árvore aninhada (raiz)."""
     init_db()
     with connect() as conn:
         cur = conn.execute(
             """INSERT INTO mapas_mentais
-               (documento_id, trilha_id, etapa_id, titulo, descricao, tema, idioma, fonte, modelo, meta_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (documento_id, trilha_id, etapa_id, titulo, descricao, tema, idioma, fonte, modelo, meta_json, pasta_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 documento_id,
                 trilha_id,
@@ -102,6 +103,7 @@ def save_mapa(
                 fonte,
                 modelo,
                 json.dumps(meta, ensure_ascii=False, default=str) if meta else None,
+                pasta_id,
             ),
         )
         mapa_id = int(cur.lastrowid)
@@ -187,6 +189,7 @@ def get_mapa(mapa_id: int) -> Optional[dict[str, Any]]:
     return {
         "id": int(r["id"]),
         "documento_id": r["documento_id"],
+        "pasta_id": r["pasta_id"] if "pasta_id" in r.keys() else None,
         "titulo": r["titulo"],
         "descricao": r["descricao"],
         "tema": r["tema"],
@@ -202,13 +205,24 @@ def get_mapa(mapa_id: int) -> Optional[dict[str, Any]]:
     }
 
 
-def list_mapas(*, documento_id: Optional[int] = None, limit: int = 50) -> list[dict[str, Any]]:
+def list_mapas(
+    *,
+    documento_id: Optional[int] = None,
+    pasta_id: Optional[int] = None,
+    sem_pasta: bool = False,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
     init_db()
     wheres = []
     params: list[Any] = []
     if documento_id is not None:
         wheres.append("m.documento_id = ?")
         params.append(documento_id)
+    if sem_pasta:
+        wheres.append("m.pasta_id IS NULL")
+    elif pasta_id is not None:
+        wheres.append("m.pasta_id = ?")
+        params.append(pasta_id)
     where_sql = ("WHERE " + " AND ".join(wheres)) if wheres else ""
     with connect() as conn:
         rows = conn.execute(
@@ -225,6 +239,7 @@ def list_mapas(*, documento_id: Optional[int] = None, limit: int = 50) -> list[d
         {
             "id": int(r["id"]),
             "documento_id": r["documento_id"],
+            "pasta_id": r["pasta_id"] if "pasta_id" in r.keys() else None,
             "titulo": r["titulo"],
             "descricao": r["descricao"],
             "tema": r["tema"],
@@ -257,7 +272,7 @@ def _touch(conn, mapa_id: int) -> None:
 
 def update_mapa(mapa_id: int, updates: dict[str, Any]) -> Optional[dict[str, Any]]:
     init_db()
-    field_map = {"titulo": "titulo", "descricao": "descricao", "tema": "tema"}
+    field_map = {"titulo": "titulo", "descricao": "descricao", "tema": "tema", "pasta_id": "pasta_id"}
     sets: list[str] = []
     params: list[Any] = []
     for key, col in field_map.items():

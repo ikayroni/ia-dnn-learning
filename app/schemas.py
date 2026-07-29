@@ -672,7 +672,15 @@ class DeckCriarRequest(BaseModel):
     tema: Optional[str] = None
     idioma: Idioma = Field(default="pt")
     documento_id: Optional[int] = Field(default=None, ge=1)
+    pasta_id: Optional[int] = None
     cards: List[FlashcardManualIn] = Field(default_factory=list)
+
+
+class DeckUpdate(BaseModel):
+    titulo: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    descricao: Optional[str] = Field(default=None, max_length=1000)
+    tema: Optional[str] = None
+    pasta_id: Optional[int] = None
 
 
 class FlashcardUpdate(BaseModel):
@@ -693,6 +701,7 @@ class FlashcardOut(Flashcard):
 class DeckResumoOut(BaseModel):
     id: int
     documento_id: Optional[int] = None
+    pasta_id: Optional[int] = None
     titulo: str
     descricao: Optional[str] = None
     tema: Optional[str] = None
@@ -850,6 +859,7 @@ class MapaCriarRequest(BaseModel):
     tema: Optional[str] = None
     idioma: Idioma = Field(default="pt")
     documento_id: Optional[int] = Field(default=None, ge=1)
+    pasta_id: Optional[int] = None
     raiz: MapaNoManualIn
 
 
@@ -878,6 +888,34 @@ class MapaUpdate(BaseModel):
     titulo: Optional[str] = Field(default=None, min_length=1, max_length=200)
     descricao: Optional[str] = Field(default=None, max_length=1000)
     tema: Optional[str] = None
+    pasta_id: Optional[int] = None
+
+
+class StudyPastaOut(BaseModel):
+    id: int
+    tipo: str
+    nome: str
+    descricao: Optional[str] = None
+    ordem: int = 0
+    total_itens: int = 0
+    criado_em: Optional[str] = None
+
+
+class StudyPastasListResponse(BaseModel):
+    pastas: List[StudyPastaOut]
+    total: int
+
+
+class StudyPastaCreate(BaseModel):
+    nome: str = Field(..., min_length=1, max_length=120)
+    descricao: Optional[str] = Field(default=None, max_length=500)
+    ordem: Optional[int] = Field(default=None, ge=0)
+
+
+class StudyPastaUpdate(BaseModel):
+    nome: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    descricao: Optional[str] = Field(default=None, max_length=500)
+    ordem: Optional[int] = Field(default=None, ge=0)
 
 
 class MapaNoOut(BaseModel):
@@ -896,6 +934,7 @@ class MapaNoOut(BaseModel):
 class MapaResumoOut(BaseModel):
     id: int
     documento_id: Optional[int] = None
+    pasta_id: Optional[int] = None
     titulo: str
     descricao: Optional[str] = None
     tema: Optional[str] = None

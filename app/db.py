@@ -239,6 +239,18 @@ CREATE INDEX IF NOT EXISTS idx_mapa_doc ON mapas_mentais(documento_id);
 CREATE INDEX IF NOT EXISTS idx_mapa_trilha ON mapas_mentais(trilha_id);
 CREATE INDEX IF NOT EXISTS idx_no_mapa ON mapa_nos(mapa_id, ordem);
 CREATE INDEX IF NOT EXISTS idx_no_parent ON mapa_nos(parent_id);
+
+-- Pastas de organização (flashcards e mapas mentais)
+CREATE TABLE IF NOT EXISTS study_pastas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo TEXT NOT NULL,               -- "flashcards" | "mapas"
+    nome TEXT NOT NULL,
+    descricao TEXT,
+    ordem INTEGER NOT NULL DEFAULT 0,
+    criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_pasta_tipo ON study_pastas(tipo, ordem, nome);
 """
 
 
@@ -269,6 +281,7 @@ _MIGRATIONS = {
     "flashcard_decks": [
         ("trilha_id", "INTEGER REFERENCES trilhas(id) ON DELETE SET NULL"),
         ("etapa_id", "INTEGER REFERENCES trilha_etapas(id) ON DELETE SET NULL"),
+        ("pasta_id", "INTEGER REFERENCES study_pastas(id) ON DELETE SET NULL"),
     ],
     "flashcards": [
         ("imagem_url", "TEXT"),
@@ -280,6 +293,9 @@ _MIGRATIONS = {
         ("pos_x", "REAL"),
         ("pos_y", "REAL"),
         ("imagem_url", "TEXT"),
+    ],
+    "mapas_mentais": [
+        ("pasta_id", "INTEGER REFERENCES study_pastas(id) ON DELETE SET NULL"),
     ],
 }
 

@@ -120,12 +120,15 @@ from app.flashcards_storage import (
     registrar_revisao,
     save_deck,
     update_card,
+    update_deck,
 )
+from app.pastas_storage import create_pasta, delete_pasta, get_pasta, list_pastas, update_pasta
 from app.schemas import (
     DeckCriarRequest,
     DeckOut,
     DeckProgressoOut,
     DecksListResponse,
+    DeckUpdate,
     EstudoResponse,
     FlashcardManualIn,
     FlashcardsEstatisticas,
@@ -136,6 +139,10 @@ from app.schemas import (
     RevisaoIn,
     RevisaoResultado,
     RevisoesHistoricoResponse,
+    StudyPastaCreate,
+    StudyPastaOut,
+    StudyPastasListResponse,
+    StudyPastaUpdate,
 )
 
 from app.api_errors import _is_console_encode_error, raise_http_for_exception
@@ -1331,6 +1338,7 @@ def flashcards_criar_deck(body: DeckCriarRequest):
         tema=body.tema,
         idioma=body.idioma,
         fonte="manual",
+        pasta_id=body.pasta_id,
     )
     deck = get_deck(deck_id)
     if not deck:
@@ -1338,12 +1346,64 @@ def flashcards_criar_deck(body: DeckCriarRequest):
     return DeckOut(**deck)
 
 
+@app.get("/flashcards/pastas", response_model=StudyPastasListResponse)
+def flashcards_listar_pastas():
+    pastas = list_pastas(tipo="flashcards")
+    return StudyPastasListResponse(pastas=pastas, total=len(pastas))
+
+
+@app.post("/flashcards/pastas", response_model=StudyPastaOut)
+def flashcards_criar_pasta(body: StudyPastaCreate):
+    pasta_id = create_pasta(tipo="flashcards", nome=body.nome, descricao=body.descricao, ordem=body.ordem)
+    pasta = get_pasta(pasta_id)
+    if not pasta:
+        raise HTTPException(status_code=500, detail="Falha ao criar pasta")
+    return StudyPastaOut(**pasta)
+
+
+@app.patch("/flashcards/pastas/{pasta_id}", response_model=StudyPastaOut)
+def flashcards_atualizar_pasta(pasta_id: int, body: StudyPastaUpdate):
+    updates = body.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="Envie ao menos um campo")
+    pasta = update_pasta(pasta_id, updates)
+    if not pasta or pasta["tipo"] != "flashcards":
+        raise HTTPException(status_code=404, detail="Pasta não encontrada")
+    return StudyPastaOut(**pasta)
+
+
+@app.delete("/flashcards/pastas/{pasta_id}")
+def flashcards_excluir_pasta(pasta_id: int):
+    pasta = get_pasta(pasta_id)
+    if not pasta or pasta["tipo"] != "flashcards":
+        raise HTTPException(status_code=404, detail="Pasta não encontrada")
+    if not delete_pasta(pasta_id):
+        raise HTTPException(status_code=404, detail="Pasta não encontrada")
+    return {"deleted": True, "pasta_id": pasta_id}
+
+
 @app.get("/flashcards/decks", response_model=DecksListResponse)
-def flashcards_listar_decks(documento_id: Optional[int] = None, limit: int = 50):
+def flashcards_listar_decks(
+    documento_id: Optional[int] = None,
+    pasta_id: Optional[int] = None,
+    sem_pasta: bool = False,
+    limit: int = 50,
+):
     if limit < 1 or limit > 200:
         raise HTTPException(status_code=400, detail="limit entre 1 e 200")
-    decks = list_decks(documento_id=documento_id, limit=limit)
+    decks = list_decks(documento_id=documento_id, pasta_id=pasta_id, sem_pasta=sem_pasta, limit=limit)
     return DecksListResponse(decks=decks, total=len(decks))
+
+
+@app.patch("/flashcards/decks/{deck_id}", response_model=DeckOut)
+def flashcards_atualizar_deck(deck_id: int, body: DeckUpdate):
+    updates = body.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="Envie ao menos um campo")
+    deck = update_deck(deck_id, updates)
+    if not deck:
+        raise HTTPException(status_code=404, detail="Deck não encontrado")
+    return DeckOut(**deck)
 
 
 @app.get("/flashcards/decks/{deck_id}", response_model=DeckOut)
@@ -1645,6 +1705,7 @@ def mapas_criar(body: MapaCriarRequest):
         tema=body.tema,
         idioma=body.idioma,
         fonte="manual",
+        pasta_id=body.pasta_id,
     )
     mapa = get_mapa(mapa_id)
     if not mapa:
@@ -1652,11 +1713,52 @@ def mapas_criar(body: MapaCriarRequest):
     return MapaOut(**mapa)
 
 
+@app.get("/mapas/pastas", response_model=StudyPastasListResponse)
+def mapas_listar_pastas():
+    pastas = list_pastas(tipo="mapas")
+    return StudyPastasListResponse(pastas=pastas, total=len(pastas))
+
+
+@app.post("/mapas/pastas", response_model=StudyPastaOut)
+def mapas_criar_pasta(body: StudyPastaCreate):
+    pasta_id = create_pasta(tipo="mapas", nome=body.nome, descricao=body.descricao, ordem=body.ordem)
+    pasta = get_pasta(pasta_id)
+    if not pasta:
+        raise HTTPException(status_code=500, detail="Falha ao criar pasta")
+    return StudyPastaOut(**pasta)
+
+
+@app.patch("/mapas/pastas/{pasta_id}", response_model=StudyPastaOut)
+def mapas_atualizar_pasta(pasta_id: int, body: StudyPastaUpdate):
+    updates = body.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="Envie ao menos um campo")
+    pasta = update_pasta(pasta_id, updates)
+    if not pasta or pasta["tipo"] != "mapas":
+        raise HTTPException(status_code=404, detail="Pasta não encontrada")
+    return StudyPastaOut(**pasta)
+
+
+@app.delete("/mapas/pastas/{pasta_id}")
+def mapas_excluir_pasta(pasta_id: int):
+    pasta = get_pasta(pasta_id)
+    if not pasta or pasta["tipo"] != "mapas":
+        raise HTTPException(status_code=404, detail="Pasta não encontrada")
+    if not delete_pasta(pasta_id):
+        raise HTTPException(status_code=404, detail="Pasta não encontrada")
+    return {"deleted": True, "pasta_id": pasta_id}
+
+
 @app.get("/mapas", response_model=MapasListResponse)
-def mapas_listar(documento_id: Optional[int] = None, limit: int = 50):
+def mapas_listar(
+    documento_id: Optional[int] = None,
+    pasta_id: Optional[int] = None,
+    sem_pasta: bool = False,
+    limit: int = 50,
+):
     if limit < 1 or limit > 200:
         raise HTTPException(status_code=400, detail="limit entre 1 e 200")
-    mapas = list_mapas(documento_id=documento_id, limit=limit)
+    mapas = list_mapas(documento_id=documento_id, pasta_id=pasta_id, sem_pasta=sem_pasta, limit=limit)
     return MapasListResponse(mapas=mapas, total=len(mapas))
 
 
