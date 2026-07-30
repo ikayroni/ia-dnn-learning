@@ -29,7 +29,7 @@ def _log(msg: str) -> None:
         pass
 
 
-def _sample_text(text: str, max_len: int = 12000) -> str:
+def _sample_text(text: str, max_len: int = 18000) -> str:
     """Amostra representativa: começo, meio e fim do material."""
     s = (text or "").strip()
     if len(s) <= max_len:
@@ -37,6 +37,43 @@ def _sample_text(text: str, max_len: int = 12000) -> str:
     third = max_len // 3
     meio = len(s) // 2
     return s[:third] + "\n\n[...]\n\n" + s[meio : meio + third] + "\n\n[...]\n\n" + s[-third:]
+
+
+BRANCH_COLORS = [
+    "#2563eb",
+    "#0891b2",
+    "#7c3aed",
+    "#db2777",
+    "#ea580c",
+    "#16a34a",
+    "#ca8a04",
+    "#dc2626",
+    "#0d9488",
+    "#4f46e5",
+    "#9333ea",
+    "#f97316",
+    "#64748b",
+]
+
+
+def _assign_branch_colors(node: dict[str, Any], nivel: int = 0, inherited: str | None = None) -> None:
+    """Atribui cores por ramo principal (estilo MindMaster)."""
+    if nivel == 0:
+        node["cor"] = node.get("cor") or "#1e40af"
+        for i, filho in enumerate(node.get("filhos") or []):
+            if not isinstance(filho, dict):
+                continue
+            cor = filho.get("cor") or BRANCH_COLORS[i % len(BRANCH_COLORS)]
+            filho["cor"] = cor
+            for desc in filho.get("filhos") or []:
+                if isinstance(desc, dict):
+                    _assign_branch_colors(desc, nivel + 2, cor)
+        return
+    if inherited and not node.get("cor"):
+        node["cor"] = inherited
+    for filho in node.get("filhos") or []:
+        if isinstance(filho, dict):
+            _assign_branch_colors(filho, nivel + 1, inherited or node.get("cor"))
 
 
 def _normalize_tree(
@@ -81,7 +118,7 @@ def _normalize_tree(
                     filhos_out.append(norm)
     return {
         "titulo": titulo[:300],
-        "nota": (nota[:2000] if isinstance(nota, str) else None),
+        "nota": (nota[:280] if isinstance(nota, str) else None),
         "cor": node.get("cor") or None,
         "filhos": filhos_out,
     }
@@ -127,6 +164,8 @@ def _gerar_arvore(
     if not raiz:
         raise RuntimeError("A IA não retornou um mapa mental válido. Tente novamente.")
 
+    _assign_branch_colors(raiz)
+
     total = _contar_nos(raiz)
     _log(f"fim | {total} nó(s) em {time.time() - t0:.1f}s")
     meta = {
@@ -149,9 +188,9 @@ def generate_mapa_from_text(
     titulo: Optional[str] = None,
     tema: Optional[str] = None,
     idioma: str = "pt",
-    max_ramos: int = 6,
-    profundidade: int = 3,
-    max_filhos: int = 5,
+    max_ramos: int = 12,
+    profundidade: int = 4,
+    max_filhos: int = 6,
     instrucoes_extras: Optional[str] = None,
 ) -> dict[str, Any]:
     raiz, meta = _gerar_arvore(
@@ -183,9 +222,9 @@ def generate_mapa_from_documento_id(
     titulo: Optional[str] = None,
     tema: Optional[str] = None,
     idioma: str = "pt",
-    max_ramos: int = 6,
-    profundidade: int = 3,
-    max_filhos: int = 5,
+    max_ramos: int = 12,
+    profundidade: int = 4,
+    max_filhos: int = 6,
     instrucoes_extras: Optional[str] = None,
     texto: Optional[str] = None,
     ocr_job_id: Optional[str] = None,
@@ -228,9 +267,9 @@ def generate_mapa_from_multi_documento_ids(
     titulo: Optional[str] = None,
     tema: Optional[str] = None,
     idioma: str = "pt",
-    max_ramos: int = 6,
-    profundidade: int = 3,
-    max_filhos: int = 5,
+    max_ramos: int = 12,
+    profundidade: int = 4,
+    max_filhos: int = 6,
     instrucoes_extras: Optional[str] = None,
 ) -> dict[str, Any]:
     if not documento_ids:

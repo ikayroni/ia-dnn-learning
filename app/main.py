@@ -1652,9 +1652,9 @@ def mapas_gerar_documento(
     documento_id: int,
     tema: Optional[str] = None,
     titulo: Optional[str] = None,
-    max_ramos: int = 6,
-    profundidade: int = 3,
-    max_filhos: int = 5,
+    max_ramos: int = 12,
+    profundidade: int = 4,
+    max_filhos: int = 6,
     instrucoes_extras: Optional[str] = None,
     idioma: str = "pt",
 ):
