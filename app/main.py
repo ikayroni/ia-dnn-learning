@@ -1661,8 +1661,8 @@ def mapas_gerar_texto(body: MapaGerarTextoRequest):
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    except RuntimeError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        raise_http_for_exception(e)
     return MapaGerarResponse(mapa=MapaOut(**result["mapa"]), meta=result["meta"])
 
 

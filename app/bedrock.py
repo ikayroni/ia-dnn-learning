@@ -875,7 +875,7 @@ Formato JSON obrigatório (sem markdown):
 TEXTO DO MATERIAL (amostra):
 {text[:18000]}"""
 
-    data = _converse_json(system, user, max_tokens=12000, temperature=0.25)
+    data = _converse_json(system, user, max_tokens=5000, temperature=0.25)
     raiz = data.get("raiz")
     if not isinstance(raiz, dict) or not str(raiz.get("titulo") or "").strip():
         raise ValueError("LLM não retornou uma raiz válida para o mapa mental.")
