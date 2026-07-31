@@ -11,8 +11,8 @@ from app.db import connect, init_db
 DISCIPLINAS = [
     {
         "id": "clinica-medica",
-        "titulo": "Clínica Médica",
-        "descricao": "Casos de emergência, diagnóstico diferencial e conduta.",
+        "titulo": "Clinica Medica",
+        "descricao": "Casi di emergenza, diagnosi differenziale e condotta.",
         "cor": "#3b82f6",
         "nivel": 2,
         "duracao": "15–20 min",
@@ -20,23 +20,23 @@ DISCIPLINAS = [
     {
         "id": "pediatria",
         "titulo": "Pediatria",
-        "descricao": "Avaliação pediátrica, vacinação e crescimento.",
+        "descricao": "Valutazione pediatrica, vaccinazione e crescita.",
         "cor": "#f59e0b",
         "nivel": 2,
         "duracao": "12–18 min",
     },
     {
         "id": "go",
-        "titulo": "Ginecologia e Obstetrícia",
-        "descricao": "Pré-natal, parto e urgências obstétricas.",
+        "titulo": "Ginecologia e Ostetricia",
+        "descricao": "Prenatale, parto e urgenze ostetriche.",
         "cor": "#ec4899",
         "nivel": 3,
         "duracao": "15–20 min",
     },
     {
         "id": "cirurgia",
-        "titulo": "Cirurgia",
-        "descricao": "Abdome agudo, trauma e avaliação pré-operatória.",
+        "titulo": "Chirurgia",
+        "descricao": "Addome acuto, trauma e valutazione preoperatoria.",
         "cor": "#8b5cf6",
         "nivel": 2,
         "duracao": "15–20 min",
@@ -44,10 +44,10 @@ DISCIPLINAS = [
     {
         "id": "medicina-legale",
         "titulo": "Medicina Legale",
-        "descricao": "Deontologia, responsabilidade médica e perícia.",
+        "descricao": "Deontologia, responsabilità medica e perizia.",
         "cor": "#0d9488",
         "nivel": 2,
-        "duracao": "15–20 min",
+        "duracao": "10–15 min",
     },
 ]
 
@@ -71,6 +71,8 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
     d["rubrica"] = _json_load(d.pop("rubrica_json", None), [])
     label = next((x["titulo"] for x in DISCIPLINAS if x["id"] == d.get("disciplina")), d.get("disciplina"))
     d["disciplina_label"] = label
+    if d.get("status") != "concluido":
+        d.pop("resposta_esperada", None)
     return d
 
 
@@ -84,6 +86,9 @@ def create_sessao(
     nivel: str = "intermediario",
     tempo_minutos: int = 15,
     usuario_email: str | None = None,
+    questao_id: int | None = None,
+    catalogo_id: int | None = None,
+    resposta_esperada: str | None = None,
 ) -> dict[str, Any]:
     init_db()
     now = _now()
@@ -91,8 +96,9 @@ def create_sessao(
         cur = conn.execute(
             """INSERT INTO prova_oral_sessoes
                (usuario_email, disciplina, titulo, resumo, enunciado, tags_json, nivel,
-                tempo_minutos, status, criado_em, atualizado_em)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'em_andamento', ?, ?)""",
+                tempo_minutos, status, questao_id, catalogo_id, resposta_esperada,
+                criado_em, atualizado_em)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'em_andamento', ?, ?, ?, ?, ?)""",
             (
                 usuario_email,
                 disciplina,
@@ -102,6 +108,9 @@ def create_sessao(
                 json.dumps(tags or [], ensure_ascii=False),
                 nivel,
                 tempo_minutos,
+                questao_id,
+                catalogo_id,
+                resposta_esperada,
                 now,
                 now,
             ),

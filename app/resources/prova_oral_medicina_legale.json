@@ -1,0 +1,148 @@
+{
+  "slug": "medicina-legale-allenamento-2026",
+  "titulo": "Allenamento Prova Orale — Medicina Legale",
+  "disciplina": "medicina-legale",
+  "descricao": "Domande tipo esame con risposte modello dalla lezione del 20/04/2026.",
+  "fonte": "MED LEGALE - lezione prova orale - 20.04.2026",
+  "tempo_minutos": 10,
+  "questoes": [
+    {
+      "ordem": 1,
+      "pergunta": "Morte per elettrocuzione: quali sono i principali aspetti?",
+      "resposta_esperada": "La morte per elettrocuzione si verifica quando una corrente elettrica attraversa il corpo umano producendo effetti soprattutto a carico del cuore e del sistema nervoso. Il meccanismo più frequente è la fibrillazione ventricolare; ci possono essere anche paralisi dei centri respiratori o arresto respiratorio per tetanizzazione muscolare. La gravità dipende da intensità, durata, tipo di corrente (l'alternata è più pericolosa), resistenza dei tessuti e percorso della corrente. Reperto esterno caratteristico: marchio elettrico (lesione cutanea a margini netti, colore grigio-giallastro). Possono esserci ustioni o metallizzazione. Reperti interni spesso aspecifici (congestione viscerale, edema polmonare). Diagnosi medico-legale per integrazione autopsia-scena, spesso per esclusione. Nella maggior parte dei casi è accidentale, ma vanno valutate circostanze e responsabilità.",
+      "tags": ["morte", "elettrocuzione", "autopsia"]
+    },
+    {
+      "ordem": 2,
+      "pergunta": "Embolia adiposa: spiega come succede e i reperti principali.",
+      "resposta_esperada": "L'embolia adiposa è una condizione in cui goccioline di grasso entrano nel circolo ematico e occludono il microcircolo soprattutto polmonare e, nei casi più gravi, sistemico. Fisiopatogenia: micro-oclusione meccanica e danno biochimico dai lipidi con effetto tossico sull'endotelio. Insorge tipicamente 24–72 ore dopo trauma con fratture di ossa lunghe o schiacciamento del midollo osseo. Triade classica: insufficienza respiratoria, alterazioni neurologiche, petecchie. Reperti autoptici: edema, congestione e microemboli lipidici nei capillari polmonari; colorazioni per grassi (Sudan, Oil Red O); microemboli e lesioni ischemiche al SNC; petecchie diffuse.",
+      "tags": ["embolia adiposa", "trauma", "autopsia"]
+    },
+    {
+      "ordem": 3,
+      "pergunta": "Morte improvvisa: cosa si devono valutare?",
+      "resposta_esperada": "Obiettivo medico-legale: stabilire causa, modalità e circostanze. Morte inaspettata e rapida in soggetto apparentemente sano o con patologia non ritenuta immediatamente letale. Escludere cause violente o sospette (trauma, intossicazioni, asfissie, omicidio/suicidio); se non chiaramente naturale → segnalazione all'autorità giudiziaria. Cause naturali principali: cardiache (aritmie, cardiopatia ischemica), cerebrali (emorragia subaracnoidea), respiratorie (embolia polmonare), altre (shock anafilattico, epilessia). Valutazione clinico-documentale: cartella clinica, farmaci, sintomi, antecedenti familiari. Autopsia spesso necessaria con esami istologici, genetici e tossicologici. Rilevanza per familiari e screening.",
+      "tags": ["morte improvvisa", "autopsia", "referto"]
+    },
+    {
+      "ordem": 4,
+      "pergunta": "Distinzione tra delitto di percosse e lesione personale.",
+      "resposta_esperada": "Le percosse (art. 581 c.p.) sono azione violenta sul corpo senza malattia nel corpo o nella mente; possono esserci dolore o segni lievi e transitori senza compromissione funzionale. Le lesioni personali (art. 582 c.p.) si hanno quando l'azione violenta provoca malattia nel corpo o nella mente, anche temporanea, con processo patologico e tempo di guarigione. Differenza centrale: percosse = violenza senza malattia; lesioni personali = violenza con malattia. Nel diritto penale 'malattia' ha significato medico-legale ampio: qualsiasi alterazione anatomica o funzionale con evoluzione patologica.",
+      "tags": ["percosse", "lesioni personali", "diritto penale"]
+    },
+    {
+      "ordem": 5,
+      "pergunta": "Come vengono classificate le lesioni personali?",
+      "resposta_esperada": "Classificazione giuridica (art. 582–583 c.p.) in 4 gradi: 1) Lesioni lievissime: malattia ≤ 20 giorni e non aggravate. 2) Lesioni lievi: malattia > 20 giorni ma < 40, senza aggravanti. 3) Lesioni gravi: malattia > 40 giorni, indebolimento permanente, pericolo di vita, incapacità di attendere alle ordinarie occupazioni per tempo rilevante. 4) Lesioni gravissime: perdita di un senso, arto o funzione, sfregio permanente del volto, perdita capacità di procreare, malattia insanabile.",
+      "tags": ["lesioni personali", "classificazione"]
+    },
+    {
+      "ordem": 6,
+      "pergunta": "Spiega il concetto del rapporto di causalità.",
+      "resposta_esperada": "Il rapporto di causalità collega una condotta (azione o omissione) a un evento dannoso con adeguato grado di certezza. Criteri: condicio sine qua non; causalità adeguata (cause idonee secondo esperienza scientifica); in ambito penale anche elevata probabilità logica. Valutazione controfattuale integrando dati clinici, autoptici e anamnestici. Verificare compatibilità cronologica, qualitativa, continuità fenomenologica, assenza di cause alternative sufficienti. Concetto di concause. Il nesso può essere interrotto solo da causa sopravvenuta autonoma, eccezionale e sufficiente.",
+      "tags": ["causalità", "responsabilità"]
+    },
+    {
+      "ordem": 7,
+      "pergunta": "Legge Gelli-Bianco: quali sono gli aspetti principali?",
+      "resposta_esperada": "Legge 24/2017: sicurezza delle cure e responsabilità professionale sanitaria. Responsabilità civile contrattuale (struttura) ed extracontrattuale (sanitario). In ambito penale: punibilità se lesione o decesso da dolo o colpa; possibile esclusione se errore da imperizia con linee guida/buone pratiche rispettate. Introduce sistemi di gestione del rischio clinico, osservatorio nazionale buone pratiche, sistema nazionale linee guida. Obbligo di trasparenza: copia cartella clinica entro 7 giorni (integrazioni entro 30). Assicurazione obbligatoria per professionisti.",
+      "tags": ["Gelli-Bianco", "responsabilità sanitaria"]
+    },
+    {
+      "ordem": 8,
+      "pergunta": "Responsabilità civile in sanità — contrattuale e extracontrattuale: spiegare le differenze.",
+      "resposta_esperada": "Di solito la struttura risponde in modo contrattuale, il medico in modo extracontrattuale salvo contratto diretto col paziente. Contrattuale: la struttura deve provare che il danno non dipende da lei; il paziente dimostra rapporto e inadempimento. Extracontrattuale: il paziente deve provare fatto, danno, nesso causale e colpa del professionista. Prescrizione: 10 anni contrattuale, 5 anni extracontrattuale. Azione contro la struttura generalmente più favorevole al paziente.",
+      "tags": ["responsabilità civile", "sanità"]
+    },
+    {
+      "ordem": 9,
+      "pergunta": "Spiega cos'è un reato e quali sono i suoi elementi.",
+      "resposta_esperada": "Il reato è un fatto umano previsto dalla legge penale a cui l'ordinamento collega una pena. Può essere delitto o contravvenzione. Elementi fondamentali: 1) elemento oggettivo (condotta, evento, nesso causale); 2) elemento soggettivo (dolo, colpa o preterintenzione); 3) imputabilità (capacità di intendere e di volere). Il reato è fatto umano, previsto dalla legge, antigiuridico, colpevole e punibile.",
+      "tags": ["reato", "diritto penale"]
+    },
+    {
+      "ordem": 10,
+      "pergunta": "Spiegare quali sono le 2 categorie di danno nella responsabilità civile.",
+      "resposta_esperada": "Danno patrimoniale: colpisce il patrimonio economico. Include danno emergente (perdita subita, es. spese mediche) e lucro cessante (guadagno mancato, riduzione capacità lavorativa). Danno non patrimoniale: non riguarda direttamente il patrimonio ma la persona (biologico/morale): peggioramento salute, sofferenza fisica e morale, peggioramento vita di relazione. Formula: patrimoniale = perdita di soldi o mancato guadagno; non patrimoniale = lesione della persona, salute o sfera morale-relazionale.",
+      "tags": ["danno patrimoniale", "responsabilità civile"]
+    },
+    {
+      "ordem": 11,
+      "pergunta": "Differenza tra capacità giuridica e capacità di agire.",
+      "resposta_esperada": "Capacità giuridica: capacità di essere soggetto di diritti e doveri; si acquisisce alla nascita, è uguale per tutti, termina con la morte. Capacità di agire: capacità di esercitare autonomamente diritti e doveri; si acquisisce di norma alla maggiore età (18 anni in Italia), può variare o essere persa per incapacità parziale o totale.",
+      "tags": ["capacità giuridica", "diritto civile"]
+    },
+    {
+      "ordem": 12,
+      "pergunta": "Differenza tra dolo, colpa e preterintenzione.",
+      "resposta_esperada": "Dolo: la persona vuole il fatto e il risultato. Colpa: non vuole il risultato ma accade per negligenza, imprudenza, imperizia o violazione di regole. Preterintenzione: vuole un fatto meno grave ma provoca evento più grave dell'intenzione. Esempi: dolo = voglio uccidere; colpa = non voglio uccidere ma causo morte per errore; preterintenzione = voglio colpire ma la persona muore.",
+      "tags": ["dolo", "colpa", "diritto penale"]
+    },
+    {
+      "ordem": 13,
+      "pergunta": "Delitto perseguibile d'ufficio: spiegare brevemente.",
+      "resposta_esperada": "Reato per cui il pubblico ministero deve procedere anche senza querela della vittima. Lo Stato persegue automaticamente. Collegato al principio dell'obbligo di referto/rapporto. Esempi: omicidio, rapina, estorsione, maltrattamenti, lesioni gravi o gravissime.",
+      "tags": ["reato", "querela", "referto"]
+    },
+    {
+      "ordem": 14,
+      "pergunta": "Referto: cosa significa? Chi deve farlo? Elementi descrittivi, tempistica e quando non è obbligatorio.",
+      "resposta_esperada": "Il referto è l'atto scritto con cui un esercente professione sanitaria riferisce all'Autorità giudiziaria di aver prestato assistenza in casi che possono presentare caratteri di delitto perseguibile d'ufficio. Obbligo per tutti gli esercenti professione sanitaria. Deve indicare persona assistita, luogo attuale, luogo/tempo/circostanze dell'intervento, notizie utili su circostanze, mezzi e effetti (prognosi). Entro 48 ore o immediatamente se ritardo pericoloso. Omissione o ritardo è reato. Non obbligatorio se espone l'assistito a procedimento penale; esclusa punibilità in caso di grave minaccia al medico.",
+      "tags": ["referto", "obbligo"]
+    },
+    {
+      "ordem": 15,
+      "pergunta": "Come deve essere l'accertamento della morte encefalica?",
+      "resposta_esperada": "Procedura collegiale e ripetuta: cessazione irreversibile di tutte le funzioni encefaliche. Condizioni: incoscienza e assenza riflessi del tronco; assenza respiro spontaneo (test di apnea); silenzio elettrico cerebrale (EEG). Serve diagnosi eziologica e assenza di fattori confondenti. In alcuni casi serve conferma assenza flusso ematico encefalico. Collegio medico di 3: medico legale (o sostituto), anestesista/rianimatore, neurologo esperto EEG. Verifiche all'inizio e fine del periodo di osservazione (standard 6 ore). Danno anossico: osservazione non prima di 24 ore dall'insulto salvo assenza flusso encefalico.",
+      "tags": ["morte encefalica", "accertamento"]
+    },
+    {
+      "ordem": 16,
+      "pergunta": "Come deve essere l'accertamento della morte nei casi con arresto cardiaco?",
+      "resposta_esperada": "Oltre alla valutazione obiettiva medica, è richiesto un elettrocardiogramma (ECG) di almeno 20 minuti che dimostri assenza di attività elettrica cardiaca.",
+      "tags": ["morte", "arresto cardiaco"]
+    },
+    {
+      "ordem": 17,
+      "pergunta": "Quali sono le categorie principali di fenomeni dopo la morte?",
+      "resposta_esperada": "1) Fenomeni abiotici (vitali negativi): indicano cessazione della vita. Immediati: arresto cardiaco, perdita coscienza, apnea. Consecutivi: algor mortis, rigor mortis, livor mortis. 2) Fenomeni trasformativi (vitali positivi): modificano il cadavere. Distruttivi: autolisi, putrefazione, macerazione. Conservativi: saponificazione, mummificazione, corificazione.",
+      "tags": ["fenomeni cadaverici", "tanatologia"]
+    },
+    {
+      "ordem": 18,
+      "pergunta": "Cartella clinica: descrivi la sua importanza e i suoi elementi.",
+      "resposta_esperada": "Insieme di documenti assistenziali sanitari del paziente. Atto pubblico di fede privilegiata con efficacia giuridica e valore medico-legale. Funzioni: valutazione cura, integrazione professionisti, aspetti medico-legali, fonte scientifica/gestione. Dati sensibili trattati secondo privacy. Elementi: identificazione paziente, registro, diagnosi di accettazione, anamnesi ed esame obiettivo, diario clinico (visite, accertamenti, consulenze, terapie, interventi chirurgici).",
+      "tags": ["cartella clinica", "documentazione"]
+    },
+    {
+      "ordem": 19,
+      "pergunta": "Cartella clinica: requisiti principali, diritti del paziente e tempistica per la copia.",
+      "resposta_esperada": "Requisiti: tracciabilità, veridicità, pertinenza, chiarezza, completezza, attualità, accuratezza, appropriatezza. Il paziente, familiare o delegato possono richiedere copia. Entro 7 giorni deve essere consegnata la copia; integrazioni entro massimo 30 giorni dalla richiesta (Legge Gelli-Bianco).",
+      "tags": ["cartella clinica", "diritti paziente"]
+    },
+    {
+      "ordem": 20,
+      "pergunta": "Cos'è il consenso informato e quali sono le caratteristiche principali?",
+      "resposta_esperada": "Diritto del paziente di decidere liberamente e consapevolmente sui trattamenti dopo informazioni adeguate. Informazioni su diagnosi, prognosi, benefici/rischi, alternative e conseguenze del rifiuto. Nessun trattamento senza consenso libero e informato salvo casi di legge (rischio di morte, trattamento obbligatorio). Consenso personale, attuale, libero e revocabile. Documentazione scritta o videoregistrata in cartella clinica e fascicolo sanitario elettronico.",
+      "tags": ["consenso informato", "deontologia"]
+    },
+    {
+      "ordem": 21,
+      "pergunta": "DAT: cosa sono e spiega quello che sai.",
+      "resposta_esperada": "Disposizioni Anticipate di Trattamento (testamento biologico): volontà anticipate su trattamenti sanitari se incapaci di decidere. Maggiorenne capace può esprimere consenso o rifiuto a indagini, terapie, nutrizione/idrazione artificiali. Redazione davanti a notaio, Comune, strutture sanitarie o consolati. Gratuite, revocabili, raccolte in Banca dati nazionale del Ministero della Salute. Possibile nomina fiduciario. Medico vincolato salvo incongruenze palese o nuove terapie imprevedibili; in conflitto decide giudice tutelare.",
+      "tags": ["DAT", "testamento biologico"]
+    },
+    {
+      "ordem": 22,
+      "pergunta": "Impiccamento: descrizione, fisiopatogenia e aspetti all'esame.",
+      "resposta_esperada": "Morte asfittica da sospensione del corpo con laccio al collo mantenuto dal peso della vittima. Meccanismi: occlusione vie aeree; occlusione arterie carotide e vene giugulari; frattura-lussazione cervicale; attivazione riflessa del glomo carotideo con inibizione attività cardiaca. Esame esterno: solco di compressione con nodo, protrusione lingua, ipostasi a guanto e calzino. Sottotipi completo/incompleto e tipico/atipico secondo sospensione e posizione del laccio.",
+      "tags": ["impiccamento", "morte violenta"]
+    },
+    {
+      "ordem": 23,
+      "pergunta": "IVG: cos'è e quali sono gli aspetti nella legislazione italiana?",
+      "resposta_esperada": "Legge 194/1978 regola l'interruzione volontaria di gravidanza come scelta consapevole, non controllo nascite. Entro 90 giorni: richiesta della donna per motivi di salute, economici, sociali, familiari; minorenni richiedono assenso di chi esercita potestà salvo giudice tutelare. Dopo 90 giorni: solo su segnalazione medica per grave pericolo vita donna o patologie gravi del feto. Consultori informano su diritti e servizi; certificato e periodo di riflessione di 7 giorni salvo urgenza. Metodi: farmacologico (mifepristone + prostaglandina entro 9 settimane) o chirurgico.",
+      "tags": ["IVG", "legislazione"]
+    }
+  ]
+}

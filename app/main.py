@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 import app as app_pkg
 
@@ -173,13 +173,24 @@ from app.schemas import (
     MapasListResponse,
     MapaUpdate,
     ProvaOralAvaliarRequest,
+    ProvaOralCatalogoOut,
+    ProvaOralCriarCatalogoRequest,
+    ProvaOralCriarQuestaoRequest,
     ProvaOralDashboardOut,
     ProvaOralEstatisticasOut,
     ProvaOralIniciarRequest,
+    ProvaOralQuestaoOut,
     ProvaOralSessaoOut,
     ProvaOralSessoesListResponse,
 )
-from app.prova_oral_service import avaliar_sessao, dashboard, iniciar_sessao
+from app.prova_oral_catalog import get_catalogo, list_catalogos, list_questoes
+from app.prova_oral_service import (
+    adicionar_questao_prova,
+    avaliar_sessao,
+    criar_prova,
+    dashboard,
+    iniciar_sessao,
+)
 from app.prova_oral_storage import get_estatisticas, get_sessao, list_sessoes
 
 app = FastAPI(
@@ -1886,10 +1897,70 @@ def prova_oral_dashboard(request: Request):
     data = dashboard(_user_email(request))
     return ProvaOralDashboardOut(
         disciplinas=data["disciplinas"],
+        catalogos=[ProvaOralCatalogoOut(**c) for c in data.get("catalogos", [])],
         estatisticas=ProvaOralEstatisticasOut(**data["estatisticas"]),
         sessao_ativa=_sessao_out(data["sessao_ativa"]) if data.get("sessao_ativa") else None,
         sessoes=[_sessao_out(s) for s in data.get("sessoes", [])],
     )
+
+
+@app.get("/prova-oral/catalogos", response_model=List[ProvaOralCatalogoOut])
+def prova_oral_listar_catalogos(disciplina: str | None = None):
+    cats = list_catalogos(disciplina=disciplina)
+    out = []
+    for c in cats:
+        item = dict(c)
+        item["questoes"] = list_questoes(int(c["id"]))
+        out.append(ProvaOralCatalogoOut(**item))
+    return out
+
+
+@app.get("/prova-oral/catalogos/{catalogo_id}", response_model=ProvaOralCatalogoOut)
+def prova_oral_obter_catalogo(catalogo_id: int):
+    cat = get_catalogo(catalogo_id)
+    if not cat:
+        raise HTTPException(status_code=404, detail="Prova non trovata")
+    item = dict(cat)
+    item["questoes"] = list_questoes(catalogo_id)
+    return ProvaOralCatalogoOut(**item)
+
+
+@app.post("/prova-oral/catalogos", response_model=ProvaOralCatalogoOut)
+def prova_oral_criar_catalogo(body: ProvaOralCriarCatalogoRequest):
+    try:
+        cat = criar_prova(
+            slug=body.slug,
+            titulo=body.titulo,
+            disciplina=body.disciplina,
+            descricao=body.descricao,
+            fonte=body.fonte,
+            tempo_minutos=body.tempo_minutos,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise_http_for_exception(e)
+    item = dict(cat)
+    item["questoes"] = []
+    return ProvaOralCatalogoOut(**item)
+
+
+@app.post("/prova-oral/catalogos/{catalogo_id}/questoes", response_model=ProvaOralQuestaoOut)
+def prova_oral_criar_questao(catalogo_id: int, body: ProvaOralCriarQuestaoRequest):
+    try:
+        q = adicionar_questao_prova(
+            catalogo_id,
+            pergunta=body.pergunta,
+            resposta_esperada=body.resposta_esperada,
+            ordem=body.ordem,
+            tags=body.tags,
+            tempo_minutos=body.tempo_minutos,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise_http_for_exception(e)
+    return ProvaOralQuestaoOut(**q)
 
 
 @app.get("/prova-oral/estatisticas", response_model=ProvaOralEstatisticasOut)
@@ -1916,11 +1987,15 @@ def prova_oral_obter_sessao(sessao_id: int):
 
 @app.post("/prova-oral/sessoes", response_model=ProvaOralSessaoOut)
 def prova_oral_iniciar(body: ProvaOralIniciarRequest, request: Request):
+    if not body.questao_id and not body.catalogo_id and not body.disciplina:
+        raise HTTPException(status_code=400, detail="Specificare disciplina, catalogo_id o questao_id")
     try:
         sessao = iniciar_sessao(
-            body.disciplina,
+            disciplina=body.disciplina,
             nivel=body.nivel,
             usuario_email=_user_email(request),
+            questao_id=body.questao_id,
+            catalogo_id=body.catalogo_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

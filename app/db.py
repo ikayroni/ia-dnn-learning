@@ -276,6 +276,34 @@ CREATE TABLE IF NOT EXISTS prova_oral_sessoes (
 
 CREATE INDEX IF NOT EXISTS idx_po_sessao_user ON prova_oral_sessoes(usuario_email, criado_em DESC);
 CREATE INDEX IF NOT EXISTS idx_po_sessao_status ON prova_oral_sessoes(status);
+
+-- Catálogos de provas orais pré-prontas
+CREATE TABLE IF NOT EXISTS prova_oral_catalogos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug TEXT NOT NULL UNIQUE,
+    titulo TEXT NOT NULL,
+    disciplina TEXT NOT NULL,
+    descricao TEXT,
+    fonte TEXT,
+    tempo_minutos INTEGER NOT NULL DEFAULT 10,
+    ativo INTEGER NOT NULL DEFAULT 1,
+    criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS prova_oral_questoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    catalogo_id INTEGER NOT NULL REFERENCES prova_oral_catalogos(id) ON DELETE CASCADE,
+    ordem INTEGER NOT NULL DEFAULT 0,
+    pergunta TEXT NOT NULL,
+    resposta_esperada TEXT NOT NULL,
+    tags_json TEXT,
+    tempo_minutos INTEGER,
+    ativo INTEGER NOT NULL DEFAULT 1,
+    criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_po_questao_catalogo ON prova_oral_questoes(catalogo_id, ordem);
+CREATE INDEX IF NOT EXISTS idx_po_catalogo_disc ON prova_oral_catalogos(disciplina, ativo);
 """
 
 
@@ -321,6 +349,11 @@ _MIGRATIONS = {
     ],
     "mapas_mentais": [
         ("pasta_id", "INTEGER REFERENCES study_pastas(id) ON DELETE SET NULL"),
+    ],
+    "prova_oral_sessoes": [
+        ("questao_id", "INTEGER"),
+        ("catalogo_id", "INTEGER"),
+        ("resposta_esperada", "TEXT"),
     ],
 }
 

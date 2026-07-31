@@ -1003,11 +1003,54 @@ class ProvaOralSessaoOut(BaseModel):
     atualizado_em: Optional[str] = None
     finalizado_em: Optional[str] = None
     perguntas_guia: List[str] = Field(default_factory=list)
+    questao_id: Optional[int] = None
+    catalogo_id: Optional[int] = None
+
+
+class ProvaOralQuestaoOut(BaseModel):
+    id: int
+    catalogo_id: int
+    ordem: int = 0
+    pergunta: str
+    tags: List[str] = Field(default_factory=list)
+    tempo_minutos: Optional[int] = None
+    ativo: int = 1
+
+
+class ProvaOralCatalogoOut(BaseModel):
+    id: int
+    slug: str
+    titulo: str
+    disciplina: str
+    descricao: Optional[str] = None
+    fonte: Optional[str] = None
+    tempo_minutos: int = 10
+    total_questoes: int = 0
+    questoes: List[ProvaOralQuestaoOut] = Field(default_factory=list)
 
 
 class ProvaOralIniciarRequest(BaseModel):
-    disciplina: str = Field(..., min_length=1, max_length=80)
+    disciplina: Optional[str] = Field(default=None, max_length=80)
     nivel: str = Field(default="intermediario", max_length=40)
+    questao_id: Optional[int] = None
+    catalogo_id: Optional[int] = None
+
+
+class ProvaOralCriarCatalogoRequest(BaseModel):
+    slug: str = Field(..., min_length=2, max_length=120)
+    titulo: str = Field(..., min_length=2, max_length=200)
+    disciplina: str = Field(..., min_length=1, max_length=80)
+    descricao: Optional[str] = Field(default=None, max_length=2000)
+    fonte: Optional[str] = Field(default=None, max_length=500)
+    tempo_minutos: int = Field(default=10, ge=3, le=60)
+
+
+class ProvaOralCriarQuestaoRequest(BaseModel):
+    pergunta: str = Field(..., min_length=5, max_length=5000)
+    resposta_esperada: str = Field(..., min_length=10, max_length=20000)
+    ordem: int = Field(default=0, ge=0)
+    tags: List[str] = Field(default_factory=list)
+    tempo_minutos: Optional[int] = Field(default=None, ge=3, le=60)
 
 
 class ProvaOralAvaliarRequest(BaseModel):
@@ -1025,6 +1068,7 @@ class ProvaOralEstatisticasOut(BaseModel):
 
 class ProvaOralDashboardOut(BaseModel):
     disciplinas: List[ProvaOralDisciplinaOut]
+    catalogos: List[ProvaOralCatalogoOut] = Field(default_factory=list)
     estatisticas: ProvaOralEstatisticasOut
     sessao_ativa: Optional[ProvaOralSessaoOut] = None
     sessoes: List[ProvaOralSessaoOut] = Field(default_factory=list)

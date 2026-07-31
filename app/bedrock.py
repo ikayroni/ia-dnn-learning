@@ -1111,33 +1111,44 @@ JSON:
 
 
 def avaliar_resposta_oral(caso: dict, resposta: str) -> dict:
-    """Avalia a resposta oral (transcrita em texto) com rubrica estruturada."""
-    system = """Você é examinador de prova oral médica (Revalida Itália).
-Avalie a resposta do candidato com rigor pedagógico e feedback construtivo.
-Responda SOMENTE JSON válido."""
+    """Avalia a resposta oral (transcrita) confrontando com risposta modello se disponível."""
+    resposta_esperada = (caso.get("resposta_esperada") or "").strip()
+    system = """Sei un esaminatore di prova orale medica (Revalida Italia).
+Valuta la risposta del candidato confrontandola con la risposta modello quando fornita.
+Feedback costruttivo in ITALIANO. Rispondi SOLO JSON valido."""
+
+    blocco_modello = ""
+    if resposta_esperada:
+        blocco_modello = f"""
+Risposta modello (riferimento per la valutazione):
+{resposta_esperada}
+"""
 
     user = f"""Caso ({caso.get('disciplina_label', caso.get('disciplina', ''))}):
-Título: {caso.get('titulo', '')}
-Enunciado: {caso.get('enunciado', '')}
-
-Resposta do candidato (transcrição):
+Domanda: {caso.get('titolo', '')}
+Contesto: {caso.get('enunciado', '')}
+{blocco_modello}
+Risposta del candidato (trascrizione):
 {resposta}
+
+Valuta: completezza dei concetti chiave, correttezza medico-legale, chiarezza in italiano,
+struttura della risposta e sicurezza nella condotta/esposizione.
 
 JSON:
 {{
   "nota_geral": 85,
   "rubrica": [
-    {{"label": "Raciocínio clínico", "score": 88}},
-    {{"label": "Comunicação", "score": 91}},
-    {{"label": "Conduta", "score": 79}},
-    {{"label": "Segurança", "score": 86}},
-    {{"label": "Objetividade", "score": 83}}
+    {{"label": "Contenuto medico-legale", "score": 88}},
+    {{"label": "Completezza", "score": 84}},
+    {{"label": "Lingua italiana", "score": 86}},
+    {{"label": "Comunicazione", "score": 83}},
+    {{"label": "Struttura e chiarezza", "score": 85}}
   ],
-  "feedback": "feedback construtivo em 2-4 frases",
-  "espelho_resposta": "resposta modelo resumida com os pontos essenciais que o candidato deveria cobrir"
+  "feedback": "feedback costruttivo in italiano (2-4 frasi)",
+  "espelho_resposta": "sintesi della risposta ideale con i punti essenziali che il candidato avrebbe dovuto coprire"
 }}"""
 
-    data = _converse_json(system, user, max_tokens=3000, temperature=0.2)
+    data = _converse_json(system, user, max_tokens=3500, temperature=0.2)
     rubrica = data.get("rubrica", [])
     if not isinstance(rubrica, list) or not rubrica:
         raise ValueError("Avaliação inválida: rubrica ausente.")
