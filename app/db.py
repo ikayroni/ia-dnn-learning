@@ -251,6 +251,31 @@ CREATE TABLE IF NOT EXISTS study_pastas (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pasta_tipo ON study_pastas(tipo, ordem, nome);
+
+-- Sessões de prova oral (simulação OSCE com avaliação por IA)
+CREATE TABLE IF NOT EXISTS prova_oral_sessoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_email TEXT,
+    disciplina TEXT NOT NULL,
+    titulo TEXT NOT NULL,
+    resumo TEXT,
+    enunciado TEXT NOT NULL,
+    tags_json TEXT,
+    nivel TEXT NOT NULL DEFAULT 'intermediario',
+    tempo_minutos INTEGER NOT NULL DEFAULT 15,
+    status TEXT NOT NULL DEFAULT 'em_andamento',
+    resposta_texto TEXT,
+    rubrica_json TEXT,
+    feedback TEXT,
+    espelho_resposta TEXT,
+    nota_geral INTEGER,
+    criado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    atualizado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    finalizado_em TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_po_sessao_user ON prova_oral_sessoes(usuario_email, criado_em DESC);
+CREATE INDEX IF NOT EXISTS idx_po_sessao_status ON prova_oral_sessoes(status);
 """
 
 

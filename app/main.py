@@ -4,7 +4,7 @@ from typing import Optional
 
 import app as app_pkg
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -172,7 +172,15 @@ from app.schemas import (
     MapaOut,
     MapasListResponse,
     MapaUpdate,
+    ProvaOralAvaliarRequest,
+    ProvaOralDashboardOut,
+    ProvaOralEstatisticasOut,
+    ProvaOralIniciarRequest,
+    ProvaOralSessaoOut,
+    ProvaOralSessoesListResponse,
 )
+from app.prova_oral_service import avaliar_sessao, dashboard, iniciar_sessao
+from app.prova_oral_storage import get_estatisticas, get_sessao, list_sessoes
 
 app = FastAPI(
     title="Gerador de Questões",
@@ -1860,3 +1868,73 @@ async def mapas_upload_imagem_no(no_id: int, arquivo: UploadFile = File(...)):
         path.unlink(missing_ok=True)
         raise HTTPException(status_code=404, detail="Nó não encontrado")
     return MapaOut(**mapa)
+
+
+def _user_email(request: Request) -> str | None:
+    return request.headers.get("x-user-email") or None
+
+
+def _sessao_out(data: dict) -> ProvaOralSessaoOut:
+    rubrica = data.get("rubrica") or []
+    if rubrica and isinstance(rubrica[0], dict):
+        pass
+    return ProvaOralSessaoOut(**data)
+
+
+@app.get("/prova-oral/dashboard", response_model=ProvaOralDashboardOut)
+def prova_oral_dashboard(request: Request):
+    data = dashboard(_user_email(request))
+    return ProvaOralDashboardOut(
+        disciplinas=data["disciplinas"],
+        estatisticas=ProvaOralEstatisticasOut(**data["estatisticas"]),
+        sessao_ativa=_sessao_out(data["sessao_ativa"]) if data.get("sessao_ativa") else None,
+        sessoes=[_sessao_out(s) for s in data.get("sessoes", [])],
+    )
+
+
+@app.get("/prova-oral/estatisticas", response_model=ProvaOralEstatisticasOut)
+def prova_oral_estatisticas(request: Request):
+    return ProvaOralEstatisticasOut(**get_estatisticas(_user_email(request)))
+
+
+@app.get("/prova-oral/sessoes", response_model=ProvaOralSessoesListResponse)
+def prova_oral_listar_sessoes(request: Request, limit: int = 20):
+    sessoes = list_sessoes(usuario_email=_user_email(request), limit=min(limit, 50))
+    return ProvaOralSessoesListResponse(
+        sessoes=[_sessao_out(s) for s in sessoes],
+        total=len(sessoes),
+    )
+
+
+@app.get("/prova-oral/sessoes/{sessao_id}", response_model=ProvaOralSessaoOut)
+def prova_oral_obter_sessao(sessao_id: int):
+    sessao = get_sessao(sessao_id)
+    if not sessao:
+        raise HTTPException(status_code=404, detail="Sessão não encontrada")
+    return _sessao_out(sessao)
+
+
+@app.post("/prova-oral/sessoes", response_model=ProvaOralSessaoOut)
+def prova_oral_iniciar(body: ProvaOralIniciarRequest, request: Request):
+    try:
+        sessao = iniciar_sessao(
+            body.disciplina,
+            nivel=body.nivel,
+            usuario_email=_user_email(request),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise_http_for_exception(e)
+    return _sessao_out(sessao)
+
+
+@app.post("/prova-oral/sessoes/{sessao_id}/avaliar", response_model=ProvaOralSessaoOut)
+def prova_oral_avaliar(sessao_id: int, body: ProvaOralAvaliarRequest):
+    try:
+        sessao = avaliar_sessao(sessao_id, body.resposta_texto)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise_http_for_exception(e)
+    return _sessao_out(sessao)

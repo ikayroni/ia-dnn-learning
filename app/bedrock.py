@@ -1069,3 +1069,81 @@ Responda SOMENTE JSON válido:
     if not isinstance(areas, list) or not areas:
         raise ValueError("Plano inválido: nenhuma área retornada.")
     return data
+
+
+_DISCIPLINA_LABELS = {
+    "clinica-medica": "Clínica Médica",
+    "pediatria": "Pediatria",
+    "go": "Ginecologia e Obstetrícia",
+    "cirurgia": "Cirurgia",
+    "medicina-legale": "Medicina Legale",
+}
+
+
+def gerar_caso_oral(disciplina: str, nivel: str = "intermediario") -> dict:
+    """Gera um caso clínico para estação de prova oral (formato Revalida Itália)."""
+    label = _DISCIPLINA_LABELS.get(disciplina, disciplina)
+    system = """Você cria casos clínicos para prova oral do Revalida Itália (exame médico em italiano).
+O caso deve ser realista, focado na disciplina pedida, adequado ao nível informado.
+Responda SOMENTE JSON válido em português (campos descritivos), mas o enunciado do paciente pode misturar termos em italiano quando natural."""
+
+    user = f"""Disciplina: {label}
+Nível: {nivel}
+
+Gere um caso para estação oral de 15 minutos.
+
+JSON:
+{{
+  "titulo": "título curto do caso",
+  "resumo": "1 frase com o cenário",
+  "enunciado": "texto para o candidato ler: contexto do paciente, queixa principal e o que a banca espera que ele aborde",
+  "tags": ["tag1", "tag2", "tag3"],
+  "perguntas_guia": ["pergunta que o examinador pode fazer", "..."],
+  "tempo_minutos": 15
+}}"""
+
+    data = _converse_json(system, user, max_tokens=2500, temperature=0.35)
+    if not data.get("titulo") or not data.get("enunciado"):
+        raise ValueError("Caso oral inválido retornado pela IA.")
+    data["disciplina"] = disciplina
+    data["disciplina_label"] = label
+    return data
+
+
+def avaliar_resposta_oral(caso: dict, resposta: str) -> dict:
+    """Avalia a resposta oral (transcrita em texto) com rubrica estruturada."""
+    system = """Você é examinador de prova oral médica (Revalida Itália).
+Avalie a resposta do candidato com rigor pedagógico e feedback construtivo.
+Responda SOMENTE JSON válido."""
+
+    user = f"""Caso ({caso.get('disciplina_label', caso.get('disciplina', ''))}):
+Título: {caso.get('titulo', '')}
+Enunciado: {caso.get('enunciado', '')}
+
+Resposta do candidato (transcrição):
+{resposta}
+
+JSON:
+{{
+  "nota_geral": 85,
+  "rubrica": [
+    {{"label": "Raciocínio clínico", "score": 88}},
+    {{"label": "Comunicação", "score": 91}},
+    {{"label": "Conduta", "score": 79}},
+    {{"label": "Segurança", "score": 86}},
+    {{"label": "Objetividade", "score": 83}}
+  ],
+  "feedback": "feedback construtivo em 2-4 frases",
+  "espelho_resposta": "resposta modelo resumida com os pontos essenciais que o candidato deveria cobrir"
+}}"""
+
+    data = _converse_json(system, user, max_tokens=3000, temperature=0.2)
+    rubrica = data.get("rubrica", [])
+    if not isinstance(rubrica, list) or not rubrica:
+        raise ValueError("Avaliação inválida: rubrica ausente.")
+    nota = int(data.get("nota_geral", 0))
+    if nota <= 0:
+        scores = [int(r.get("score", 0)) for r in rubrica if isinstance(r, dict)]
+        nota = round(sum(scores) / len(scores)) if scores else 0
+    data["nota_geral"] = max(0, min(100, nota))
+    return data

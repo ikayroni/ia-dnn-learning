@@ -964,3 +964,72 @@ class MapaGerarResponse(BaseModel):
 
 MapaNoManualIn.model_rebuild()
 MapaNoOut.model_rebuild()
+
+
+# ---------- Prova oral ----------
+
+class ProvaOralDisciplinaOut(BaseModel):
+    id: str
+    titulo: str
+    descricao: str
+    cor: str
+    nivel: int
+    duracao: str
+
+
+class ProvaOralRubricaItem(BaseModel):
+    label: str
+    score: int
+
+
+class ProvaOralSessaoOut(BaseModel):
+    id: int
+    usuario_email: Optional[str] = None
+    disciplina: str
+    disciplina_label: Optional[str] = None
+    titulo: str
+    resumo: Optional[str] = None
+    enunciado: str
+    tags: List[str] = Field(default_factory=list)
+    nivel: str = "intermediario"
+    tempo_minutos: int = 15
+    status: str = "em_andamento"
+    resposta_texto: Optional[str] = None
+    rubrica: List[ProvaOralRubricaItem] = Field(default_factory=list)
+    feedback: Optional[str] = None
+    espelho_resposta: Optional[str] = None
+    nota_geral: Optional[int] = None
+    criado_em: Optional[str] = None
+    atualizado_em: Optional[str] = None
+    finalizado_em: Optional[str] = None
+    perguntas_guia: List[str] = Field(default_factory=list)
+
+
+class ProvaOralIniciarRequest(BaseModel):
+    disciplina: str = Field(..., min_length=1, max_length=80)
+    nivel: str = Field(default="intermediario", max_length=40)
+
+
+class ProvaOralAvaliarRequest(BaseModel):
+    resposta_texto: str = Field(..., min_length=1, max_length=20000)
+
+
+class ProvaOralEstatisticasOut(BaseModel):
+    casos_treinados: int
+    casos_semana: int
+    media_oral: int
+    tempo_medio_resposta: str
+    aprovacao_estimada: int
+    sessoes_concluidas: int
+
+
+class ProvaOralDashboardOut(BaseModel):
+    disciplinas: List[ProvaOralDisciplinaOut]
+    estatisticas: ProvaOralEstatisticasOut
+    sessao_ativa: Optional[ProvaOralSessaoOut] = None
+    sessoes: List[ProvaOralSessaoOut] = Field(default_factory=list)
+
+
+class ProvaOralSessoesListResponse(BaseModel):
+    sessoes: List[ProvaOralSessaoOut]
+    total: int
