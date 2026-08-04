@@ -58,7 +58,7 @@ def _sessao_from_questao(
     pergunta = str(questao.get("pergunta", ""))
     return create_sessao(
         disciplina=disciplina,
-        titulo=_titolo_curto(pergunta),
+        titulo=_titulo_curto(pergunta),
         enunciado=_enunciado_da_pergunta(pergunta),
         resumo="Rispondi alla domanda come in una prova orale reale del Revalida Italia.",
         tags=questao.get("tags") if isinstance(questao.get("tags"), list) else [],
